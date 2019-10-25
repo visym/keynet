@@ -52,6 +52,7 @@ def validate(cifardir='/proj/enigma', modelfile='/proj/enigma/jebyrne/cifar10.pt
     testloader = torch.utils.data.DataLoader(testset, batch_size=4, shuffle=False, num_workers=2)
 
     net.load_state_dict(torch.load(modelfile))
+    net.eval()
 
     (total, correct) = (0,0)
     for images,labels in testloader:

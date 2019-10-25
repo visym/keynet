@@ -41,15 +41,64 @@ class LeNet(nn.Module):
     def transform():
         return transforms.Compose([transforms.Resize( (32,32) ),
                                    transforms.ToTensor(),                                    
-                                   transforms.Normalize((0.5,), (0.5,))])
+                                   transforms.Normalize((0.1307,), (0.3081,))])
 
 
-def validate(mnistdir='/proj/enigma', modelfile='/proj/enigma/jebyrne/mnist.pth'):
-    net = LeNet()
+class Net(nn.Module):
+    """https://github.com/pytorch/examples/blob/master/mnist/main.py"""
+    def __init__(self):
+        super(Net, self).__init__()
+        self.conv1 = nn.Conv2d(1, 20, 5, 1)
+        self.conv2 = nn.Conv2d(20, 50, 5, 1)
+        self.fc1 = nn.Linear(4*4*50, 500)
+        self.fc2 = nn.Linear(500, 10)
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.max_pool2d(x, 2, 2)
+        x = F.relu(self.conv2(x))
+        x = F.max_pool2d(x, 2, 2)
+        x = x.view(-1, 4*4*50)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        return F.log_softmax(x, dim=1)
+
+    @staticmethod
+    def transform():
+        return transforms.Compose([transforms.ToTensor(),                                    
+                                   transforms.Normalize((0.1307,), (0.3081,))])
+
+
+class Net_AvgPool(nn.Module):
+    """https://github.com/pytorch/examples/blob/master/mnist/main.py"""
+    def __init__(self):
+        super(Net_AvgPool, self).__init__()
+        self.conv1 = nn.Conv2d(1, 20, 5, 1)
+        self.conv2 = nn.Conv2d(20, 50, 5, 1)
+        self.fc1 = nn.Linear(4*4*50, 500)
+        self.fc2 = nn.Linear(500, 10)
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.avg_pool2d(x, 2, 2)
+        x = F.relu(self.conv2(x))
+        x = F.avg_pool2d(x, 2, 2)
+        x = x.view(-1, 4*4*50)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        return F.log_softmax(x, dim=1)
+
+    @staticmethod
+    def transform():
+        return transforms.Compose([transforms.ToTensor(),                                    
+                                   transforms.Normalize((0.1307,), (0.3081,))])
+
+def validate(net=Net(), mnistdir='/proj/enigma', modelfile='/proj/enigma/jebyrne/mnist.pth'):
     valset = datasets.MNIST(mnistdir, download=True, train=False, transform=net.transform())
     valloader = torch.utils.data.DataLoader(valset, batch_size=64, shuffle=True)
 
     net.load_state_dict(torch.load(modelfile))
+    net.eval()
 
     (total, correct) = (0,0)
     for images,labels in valloader:
@@ -65,13 +114,13 @@ def validate(mnistdir='/proj/enigma', modelfile='/proj/enigma/jebyrne/mnist.pth'
     print("Mean classification accuracy = %f" % (correct/total))
 
 
-def train(mnistdir='/proj/enigma', modelfile='/proj/enigma/jebyrne/mnist.pth', lr=0.003, epochs=40):
-    net = LeNet()
+def train(net=Net(), mnistdir='/proj/enigma', modelfile='/proj/enigma/jebyrne/mnist.pth', lr=0.003, epochs=20):
     trainset = datasets.MNIST(mnistdir, download=True, train=True, transform=net.transform())
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=64, shuffle=True)
 
     dataiter = iter(trainloader)
-    criterion = nn.CrossEntropyLoss()
+    #criterion = nn.CrossEntropyLoss()
+    criterion = F.nll_loss
     optimizer = optim.SGD(net.parameters(), lr=lr, momentum=0.9)
     time0 = time()
 
@@ -92,4 +141,15 @@ def train(mnistdir='/proj/enigma', modelfile='/proj/enigma/jebyrne/mnist.pth', l
     torch.save(net.state_dict(), modelfile)
 
 
+def avgpool():
+    train(net=Net_AvgPool(), modelfile='/proj/enigma/jebyrne/mnist_avgpool.pth', lr=0.003, epochs=20)
+    validate(net=Net_AvgPool(),  modelfile='/proj/enigma/jebyrne/mnist_avgpool.pth')
+
+def maxpool():
+    train(net=Net(), modelfile='/proj/enigma/jebyrne/mnist.pth', lr=0.003, epochs=20)
+    validate(net=Net(),  modelfile='/proj/enigma/jebyrne/mnist.pth')
+
+def lenet():
+    train(net=LeNet(), modelfile='/proj/enigma/jebyrne/mnist_lenet.pth', lr=0.003, epochs=20)
+    validate(net=LeNet(),  modelfile='/proj/enigma/jebyrne/mnist_lenet.pth')
 
