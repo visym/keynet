@@ -9,7 +9,8 @@ import uuid
 import sys
 import copy
 
-sys.path.append('/proj/enigma/jebyrne/vipy')
+# bash setup
+#sys.path.append('/proj/enigma/jebyrne/vipy')
 import vipy.image
 import vipy.visualize
 
