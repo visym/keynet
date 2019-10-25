@@ -317,8 +317,8 @@ def optical_transformation_montage():
 
 
 
-def test_sparse_toeplitz_2d():
-    from keynet.util import sparse_toeplitz_2d
+def test_sparse_toeplitz_conv2d():
+    from keynet.util import sparse_toeplitz_conv2d
 
     (U,V,C) = (64,129,3)
     (P,Q,R) = (5,5,3)
@@ -327,14 +327,14 @@ def test_sparse_toeplitz_2d():
 
     # Spatial convolution: zero pad spatially only with 'valid' mode, do not convolve over channels
     y = scipy.signal.convolve(np.pad(img, ( ((P-1)//2, (P-1)//2), ((Q-1)//2, (Q-1)//2), (0,0)), mode='constant', constant_values=0), f, mode='valid')
-    T = sparse_toeplitz_2d( img.shape, f, as_correlation=False)
+    T = sparse_toeplitz_conv2d( img.shape, f, as_correlation=False)
     yh = T.dot(img.flatten()).reshape(img.shape[0], img.shape[1], 1)
     assert(np.allclose(y,yh))
     print('Convolution (scipy): passed')    
 
     # Spatial correlation: zero pad spatially only with 'valid' mode, do not convolve over channels
     y = scipy.signal.correlate(np.pad(img, ( ((P-1)//2, (P-1)//2), ((Q-1)//2, (Q-1)//2), (0,0)), mode='constant', constant_values=0), f, mode='valid')
-    T = sparse_toeplitz_2d( img.shape, f, as_correlation=True)
+    T = sparse_toeplitz_conv2d( img.shape, f, as_correlation=True)
     yh = T.dot(img.flatten()).reshape(img.shape[0], img.shape[1], 1)
     assert(np.allclose(y,yh))
     print('Correlation (scipy): passed')
@@ -344,7 +344,7 @@ def test_sparse_toeplitz_2d():
     kernel = torch.tensor(np.expand_dims(np.transpose(f, [2,0,1]), 0))
     y = F.conv2d(img_tensor, kernel, padding=((P-1)//2, (Q-1)//2))
     y = np.squeeze(np.transpose(np.array(y), [2,3,1,0]), 3)
-    T = sparse_toeplitz_2d( img.shape, f, as_correlation=True)
+    T = sparse_toeplitz_conv2d( img.shape, f, as_correlation=True)
     yh = T.dot(img.flatten()).reshape(img.shape[0], img.shape[1], 1)
     assert(np.allclose(y,yh))
     print('Correlation (torch): passed')
