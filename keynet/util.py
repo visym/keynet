@@ -71,4 +71,10 @@ def sparse_toeplitz_conv2d(imshape, f, as_correlation=True):
                             col_ind.append( np.ravel_multi_index( (u+p,v+q,c), (U,V,C) ))
 
     return csr_matrix((data, (row_ind, col_ind)), shape=(U*V, U*V*C))
-    
+
+
+def sparse_toeplitz_avgpool2d(imshape, kernelsize, stride):
+    F = np.ones( (kernelsize, kernelsize) )
+    W = sparse_toeplitz_conv2d(imshape, F)
+    W = W[::stride]
+    return W
