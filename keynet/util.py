@@ -30,51 +30,70 @@ def sparse_random_doubly_stochastic_matrix(n, k):
     return A
 
 
-def sparse_toeplitz_conv2d(imshape, f, as_correlation=True):
+def torch_conv2d_in_scipy(x,f,b):
+    """Torch equivalent conv2d operation in scipy, with input tensor x, filter weight f and bias b"""
+    """x=[BATCH,INCHANNEL,HEIGHT,WIDTH], f=[OUTCHANNEL,INCHANNEL,HEIGHT,WIDTH], b=[OUTCHANNEL,1]"""
+
+    assert(len(x.shape) == 4 and len(f.shape) == 4)
+    assert(f.shape[1] == x.shape[1])  # equal inchannels
+    assert(f.shape[2]==f.shape[3] and f.shape[1]%2 == 1)  # filter is square, odd
+    assert(b.shape[0] == f.shape[0])  # weights and bias dimensionality match
+
+    (N,C,U,V) = (x.shape)
+    (M,K,P,Q) = (f.shape)
+    x_spatialpad = np.pad(x, ( (0,0), (0,0), ((P-1)//2, (P-1)//2), ((Q-1)//2, (Q-1)//2)), mode='constant', constant_values=0)
+    y = np.array([scipy.signal.correlate(x_spatialpad[n,:,:,:], f[m,:,:,:], mode='valid') + b[m] for n in range(0,N) for m in range(0,M)])
+    return np.reshape(y, (N,M,U,V) )
+
+
+def sparse_toeplitz_conv2d(inshape, f, b, as_correlation=True):
     # Returns sparse toeplitz matrix (W) that is equivalent to per-channel pytorch conv2d (spatial correlation)
-    #
-    # y = W.dot(img.flatten()).reshape(img.shape[0], img.shape[1]) 
-    # yh = scipy.signal.correlate(np.pad(img, ( ((P-1)//2, (P-1)//2), ((Q-1)//2, (Q-1)//2), (0,0)), mode='constant'), f, mode='valid')
-    # np.allclose(y, yh)
+    # see also: test_keynet.test_sparse_toeplitz_conv2d()
 
     # Valid shapes
-    fshape = f.shape
-    if len(imshape) == 2:
-        imshape = (imshape[0], imshape[1], 1)
-    if len(f.shape) == 2:
-        fshape = (fshape[0], fshape[1], 1)
-        f = np.expand_dims(f, 2)
-    assert(len(imshape) == 3 and len(fshape) == 3 and fshape[2] == imshape[2])  # 3D, equal channels
-    assert(fshape[0]==fshape[1] and fshape[0]%2 == 1)  # odd, square
+    assert(len(inshape) == 4 and len(f.shape) == 4)  # 4D tensor inshape=(batch, height, width, inchannels), f.shape=(outchannels, kernelheight, kernelwidth, inchannels)
+    assert(f.shape[1] == inshape[1])  # equal inchannels
+    assert(f.shape[2]==f.shape[3] and f.shape[2]%2 == 1)  # filter is square, odd
+    assert(len(b.shape) == 1 and b.shape[0] == f.shape[0])  # filter and bias have composable shapes
 
     # Correlation vs. convolution?
-    (U,V,C) = imshape
-    (P,Q,R) = fshape
+    (N,C,U,V) = inshape
+    (M,K,P,Q) = f.shape
     C_range = range(0,C)
+    M_range = range(0,M)
     P_range = range(-(P-1)//2, ((P-1)//2)+1)
     Q_range = range(-(Q-1)//2, ((Q-1)//2)+1)
-
-    # For every image_row
     (data, row_ind, col_ind) = ([],[],[])
-    for u in range(0,U):
-        # For every image_column
-        for v in range(0,V):
-            # For every channel (transposed)
-            for (k,c) in enumerate(C_range if as_correlation else reversed(C_range)):
-                # For every kernel_row (transposed)
-                for (i,p) in enumerate(P_range if as_correlation else reversed(P_range)):
-                    # For every kernel_col (transposed)
-                    for (j,q) in enumerate(Q_range if as_correlation else reversed(Q_range)):
-                        if ((u+p)>=0 and (v+q)>=0 and (u+p)<U and (v+q)<V):
-                            data.append(f[i,j,k])
-                            row_ind.append( np.ravel_multi_index( (u,v), (U,V) ) )
-                            col_ind.append( np.ravel_multi_index( (u+p,v+q,c), (U,V,C) ))
 
-    return csr_matrix((data, (row_ind, col_ind)), shape=(U*V, U*V*C))
+    # For every batch element
+    for n in range(0,N):
+        # For every image_row
+        for u in range(0,U):
+            # For every image_column
+            for v in range(0,V):
+                # For every inchannel (transposed)
+                for (k_inchannel, c_inchannel) in enumerate(C_range if as_correlation else reversed(C_range)):
+                    # For every kernel_row (transposed)
+                    for (i,p) in enumerate(P_range if as_correlation else reversed(P_range)):
+                        # For every kernel_col (transposed)
+                        for (j,q) in enumerate(Q_range if as_correlation else reversed(Q_range)):
+                            # For every outchannel
+                            for (k_outchannel, c_outchannel) in enumerate(M_range if as_correlation else reversed(M_range)):
+                                if ((u+p)>=0 and (v+q)>=0 and (u+p)<U and (v+q)<V):
+                                    data.append(f[k_outchannel,k_inchannel,i,j])
+                                    row_ind.append( np.ravel_multi_index( (n,c_outchannel,u,v), (N,M,U,V) ) )
+                                    col_ind.append( np.ravel_multi_index( (n,c_inchannel, u+p, v+q), (N,C,U,V) ))
+
+    # Sparse matrix (with bias using affine augmentation)
+    T = csr_matrix((data, (row_ind, col_ind)), shape=(N*M*U*V, N*C*U*V))
+    lastcol = csr_matrix(np.array([x*np.ones( (U*V) ) for n in range(0,N) for x in b]).reshape( (N*M*U*V,1) ))
+    T_bias = scipy.sparse.hstack( (T,lastcol) )
+    return T_bias
 
 
-def sparse_toeplitz_avgpool2d(imshape, kernelsize, stride):
-    F = np.ones( (kernelsize, kernelsize) )
-    W = sparse_toeplitz_conv2d(imshape, F)
-    W = W[::stride]
-    return W
+def sparse_toeplitz_avgpool2d(inshape, filtershape, stride):
+    (outchannel, inchannel, filtersize, filtersize) = filtershape
+    F = (1.0 / (kernelsize*kernelsize))*np.ones( (outchannel, inchannel, kernelsize, kernelsize) )
+    #W = sparse_toeplitz_conv2d(inshape, F)
+    #W = W[::stride]
+    #return W

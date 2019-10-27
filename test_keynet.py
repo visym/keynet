@@ -318,36 +318,27 @@ def optical_transformation_montage():
 
 
 def test_sparse_toeplitz_conv2d():
-    from keynet.util import sparse_toeplitz_conv2d
+    from keynet.util import sparse_toeplitz_conv2d, torch_conv2d_in_scipy
 
-    (U,V,C) = (64,129,3)
-    (P,Q,R) = (5,5,3)
-    img = np.random.rand(U,V,C)
-    f = np.random.randn(P,Q,R)
+    (N,C,U,V) = (2,3,9,16)
+    (M,K,P,Q) = (4,3,3,3)
+    img = np.random.rand(N,C,U,V)
+    f = np.random.randn(M,K,P,Q)
+    b = np.random.randn(M).flatten()
 
-    # Spatial convolution: zero pad spatially only with 'valid' mode, do not convolve over channels
-    y = scipy.signal.convolve(np.pad(img, ( ((P-1)//2, (P-1)//2), ((Q-1)//2, (Q-1)//2), (0,0)), mode='constant', constant_values=0), f, mode='valid')
-    T = sparse_toeplitz_conv2d( img.shape, f, as_correlation=False)
-    yh = T.dot(img.flatten()).reshape(img.shape[0], img.shape[1], 1)
-    assert(np.allclose(y,yh))
-    print('Convolution (scipy): passed')    
+    # Toeplitz matrix
+    T = sparse_toeplitz_conv2d( img.shape, f, b, as_correlation=True)
+    yh = T.dot(np.hstack((img.flatten(),1.0))).reshape(N,M,U,V)
 
-    # Spatial correlation: zero pad spatially only with 'valid' mode, do not convolve over channels
-    y = scipy.signal.correlate(np.pad(img, ( ((P-1)//2, (P-1)//2), ((Q-1)//2, (Q-1)//2), (0,0)), mode='constant', constant_values=0), f, mode='valid')
-    T = sparse_toeplitz_conv2d( img.shape, f, as_correlation=True)
-    yh = T.dot(img.flatten()).reshape(img.shape[0], img.shape[1], 1)
-    assert(np.allclose(y,yh))
-    print('Correlation (scipy): passed')
+    # Spatial convolution:  torch replicated in scipy
+    y_scipy = torch_conv2d_in_scipy(img, f, b)
+    assert(np.allclose(y_scipy, yh))
+    print('Correlation (scipy vs. toeplitz): passed')    
 
     # Torch spatial correlation: reshape torch to be tensor sized [BATCH x CHANNEL x HEIGHT x WIDTH]
-    img_tensor = torch.tensor(np.expand_dims(np.transpose(img, [2,0,1]), 0))
-    kernel = torch.tensor(np.expand_dims(np.transpose(f, [2,0,1]), 0))
-    y = F.conv2d(img_tensor, kernel, padding=((P-1)//2, (Q-1)//2))
-    y = np.squeeze(np.transpose(np.array(y), [2,3,1,0]), 3)
-    T = sparse_toeplitz_conv2d( img.shape, f, as_correlation=True)
-    yh = T.dot(img.flatten()).reshape(img.shape[0], img.shape[1], 1)
-    assert(np.allclose(y,yh))
-    print('Correlation (torch): passed')
+    y_torch = F.conv2d(torch.tensor(img), torch.tensor(f), bias=torch.tensor(b), padding=((P-1)//2, (Q-1)//2))
+    assert(np.allclose(y_torch,yh))
+    print('Correlation (torch vs. toeplitz): passed')
 
     return(T)
 
