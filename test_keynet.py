@@ -343,5 +343,42 @@ def test_sparse_toeplitz_conv2d():
     return(T)
 
 
+def test_sparse_toeplitz_avgpool2d():
+    from keynet.util import sparse_toeplitz_avgpool2d, torch_avgpool2d_in_scipy
+
+    np.random.seed(0)
+    (N,C,U,V) = (1,1,6,8)
+    (kernelsize, stride) = (3,2)
+    (P,Q) = (kernelsize,kernelsize)
+    img = np.random.rand(N,C,U,V)
+
+    # Toeplitz matrix
+    T = sparse_toeplitz_avgpool2d( (N,C,U,V), (C,C,kernelsize, kernelsize), stride=stride)
+    yh = T.dot(img.flatten()).reshape(N,C,U//stride,V//stride)
+
+    # Average pooling
+    y_scipy = torch_avgpool2d_in_scipy(img, kernelsize, stride)
+    assert(np.allclose(y_scipy, yh))
+    print('Average pool 2D (scipy vs. toeplitz): passed')    
+
+    # Torch avgpool
+    y_torch = F.avg_pool2d(torch.tensor(img), kernelsize, stride=stride, padding=((P-1)//2, (Q-1)//2))
+
+    #print(img)
+    #print(y_torch)
+
+    assert(np.allclose(y_torch,yh))
+    print('Average pool 2D (torch vs. toeplitz): passed')
+
+
+    return T
+
+    
+
+
+
+
+
+
 
 
