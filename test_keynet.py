@@ -321,14 +321,14 @@ def test_sparse_toeplitz_conv2d():
     from keynet.util import sparse_toeplitz_conv2d, torch_conv2d_in_scipy
 
     (N,C,U,V) = (2,3,9,16)
-    (M,K,P,Q) = (4,3,3,3)
+    (M,C,P,Q) = (4,3,3,3)
     img = np.random.rand(N,C,U,V)
-    f = np.random.randn(M,K,P,Q)
+    f = np.random.randn(M,C,P,Q)
     b = np.random.randn(M).flatten()
 
     # Toeplitz matrix
-    T = sparse_toeplitz_conv2d( img.shape, f, b, as_correlation=True)
-    yh = T.dot(np.hstack((img.flatten(),1.0))).reshape(N,M,U,V)
+    T = sparse_toeplitz_conv2d( (C,U,V), f, b, as_correlation=True)
+    yh = T.dot(np.hstack((img.reshape(N,C*U*V), np.ones( (N,1) ))).transpose()).transpose().reshape(N,M,U,V)
 
     # Spatial convolution:  torch replicated in scipy
     y_scipy = torch_conv2d_in_scipy(img, f, b)
@@ -347,31 +347,32 @@ def test_sparse_toeplitz_avgpool2d():
     from keynet.util import sparse_toeplitz_avgpool2d, torch_avgpool2d_in_scipy
 
     np.random.seed(0)
-    (N,C,U,V) = (1,1,6,8)
+    (N,C,U,V) = (1,1,6,6)
     (kernelsize, stride) = (3,2)
     (P,Q) = (kernelsize,kernelsize)
     img = np.random.rand(N,C,U,V)
 
     # Toeplitz matrix
-    T = sparse_toeplitz_avgpool2d( (N,C,U,V), (C,C,kernelsize, kernelsize), stride=stride)
-    yh = T.dot(img.flatten()).reshape(N,C,U//stride,V//stride)
+    T = sparse_toeplitz_avgpool2d( (C,U,V), (C,C,kernelsize,kernelsize), stride=stride)
+    yh = T.dot(img.reshape(N,C*U*V).transpose()).transpose().reshape(N,C,U//stride,V//stride)
 
     # Average pooling
     y_scipy = torch_avgpool2d_in_scipy(img, kernelsize, stride)
+    #print(y_scipy)
+
     assert(np.allclose(y_scipy, yh))
     print('Average pool 2D (scipy vs. toeplitz): passed')    
 
     # Torch avgpool
     y_torch = F.avg_pool2d(torch.tensor(img), kernelsize, stride=stride, padding=((P-1)//2, (Q-1)//2))
-
-    #print(img)
     #print(y_torch)
-
     assert(np.allclose(y_torch,yh))
     print('Average pool 2D (torch vs. toeplitz): passed')
 
+    #assert(np.allclose(y_torch,y_scipy))
+    #print('Average pool 2D (torch vs. scipy): passed')
 
-    return T
+    #return T
 
     
 

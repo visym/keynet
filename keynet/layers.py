@@ -11,9 +11,12 @@ class KeyedConv2d(nn.Module):
         self.stride = stride
         self.What = None
 
-    def key(self, W, A, x):
-        imshape = x.shape[0]
-        self.What = keynet.util.sparse_toeplitz_conv2d(imshape, W, as_correlation=True)
+    def key(self, w, b, A, Ainv, inshape):
+        assert(w.shape[0] == self.out_channels and
+               w.shape[1] == self.in_channels and
+               w.shape[2] == self.kernel_size and
+               b.shape[0] == self.out_channels)
+        self.What = keynet.util.sparse_toeplitz_conv2d(inshape, w, bias=b, stride=self.stride)
 
     def forward(self, x):
         return self.What.dot(x)
@@ -26,7 +29,8 @@ class KeyedLinear(nn.Module):
         self.out_features = out_features
         self.What = None
 
-    def key(self, W, A, x):
+    def key(self, W, A, Ainv):
+        assert(W.shape[0] == self.out_features and W.shape[1] == self.in_features)
         self.What = multi_dot( (A, W, np.linalg.inv(A)) )
         return self.What
         
@@ -40,9 +44,19 @@ class KeyedAvgpool2d(nn.Module):
         self.kernel_size = kernel_size
         self.stride = stride
 
-    def key(self, A, x):
-        imshape = x.shape[0]
-        self.What = keynet.util.sparse_toeplitz_avgpool2d(imshape, self.kernel_size, self.stride)        
+    def key(self, A, Ainv, inshape):
+        self.What = keynet.util.sparse_toeplitz_avgpool2d(inshape, (inshape[0],inshape[0],self.kernel_size,self.kernel_size), self.stride)        
+
+    def forward(self, x):
+        return self.What.dot(x)
+
+
+class KeyedDropout(nn.Module):
+    def __init__(self):
+        super(KeyedDropout, self).__init__()
+
+    def key(self, w, A, Ainv):
+        self.What = scipy.sparse.diags(w.flatten())
 
     def forward(self, x):
         return self.What.dot(x)
