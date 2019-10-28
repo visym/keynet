@@ -235,3 +235,23 @@ def test_keynet_mnist():
     print('MNIST StochasticKeyNet: passed')
 
     
+def test_keynet_cifar():
+    torch.set_grad_enabled(False)
+    np.random.seed(0)
+
+    # AllConvNet
+    net = cifar10.AllConvNet()
+    net.load_state_dict(torch.load('/proj/enigma/jebyrne/cifar10_allconv.pth'))
+    net.eval()
+    x = torch.tensor(np.random.rand(2,3,32,32).astype(np.float32))
+    y = net(x)
+
+    # StochasticKeyNet
+    A0 = sparse_permutation_matrix(3*32*32 + 1)
+    A0inv = A0.transpose()
+    keynet = cifar.StochasticKeyNet()
+    keynet.load_state_dict_keyed(torch.load('/proj/enigma/jebyrne/cifar10_allconv.pth'), A0inv=A0inv)
+    keynet.eval()    
+    yh = keynet.decrypt(keynet(keynet.encrypt(A0, x)))
+    assert(np.allclose(np.array(y), np.array(yh)))
+    print('CIFAR-10 StochasticKeyNet: passed')

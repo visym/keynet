@@ -9,9 +9,9 @@ import torch.nn.functional as F
 
 class AllConvNet(nn.Module):
     """https://github.com/StefOe/all-conv-pytorch/blob/master/cifar10.ipynb"""
-    def __init__(self, input_size, n_classes=10, **kwargs):
+    def __init__(self, n_classes=10, **kwargs):
         super(AllConvNet, self).__init__()
-        self.conv1 = nn.Conv2d(input_size, 96, 3, padding=1)
+        self.conv1 = nn.Conv2d(3, 96, 3, padding=1)
         self.conv2 = nn.Conv2d(96, 96, 3, padding=1)
         self.conv3 = nn.Conv2d(96, 96, 3, padding=1, stride=2)
         self.conv4 = nn.Conv2d(96, 192, 3, padding=1)
@@ -35,8 +35,8 @@ class AllConvNet(nn.Module):
         conv8_out = F.relu(self.conv8(conv7_out))         # (192,8,8) -> (192,8,8)
         class_out = F.relu(self.class_conv(conv8_out))    # (192,8,8) -> (10,8,8)
         pool_out = F.adaptive_avg_pool2d(class_out, 1)    # (10,8,8) -> (10,1,1)
-        pool_out.squeeze_(-1)
-        pool_out.squeeze_(-1)
+        pool_out = pool_out.squeeze_(-1)
+        pool_out = pool_out.squeeze_(-1)
         return pool_out
 
     @staticmethod
@@ -45,7 +45,7 @@ class AllConvNet(nn.Module):
                                    transforms.ToTensor(),       
                                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])                             
     def loss(self, x):
-        return F.log_softmax(x, dim=1)
+        return x
 
 
 class StochasticKeyNet(AllConvNet):
@@ -107,7 +107,6 @@ class StochasticKeyNet(AllConvNet):
                          'A8':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x8'])+1),
                          'A9':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x9'])+1),
                          'A10':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x10'])+1)}
-
         
         diagonal_keys.update({'A1inv':sparse_inverse_diagonal_matrix(diagonal_keys['A1']),
                               'A2inv':sparse_inverse_diagonal_matrix(diagonal_keys['A2']),
@@ -166,7 +165,7 @@ class StochasticKeyNet(AllConvNet):
             return torch_affine_deaugmentation_tensor(x)
 
     def loss(self, x):
-        return F.log_softmax(self.decrypt(x), dim=1)
+        return self.decrypt(x)
 
 
 
@@ -190,37 +189,37 @@ def validate(net, cifardir='/proj/enigma', secretkey=None):
 
 
 def train(net, modelfile, cifardir='/proj/enigma', epochs=40, lr=0.001):
-    """https://github.com/pytorch/examples/tree/master/mnist"""
     trainset = torchvision.datasets.CIFAR10(root=cifardir, train=True, download=True, transform=net.transform())
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=4, shuffle=True, num_workers=2)
-
     classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
     
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(net.parameters(), lr=lr, momentum=0.9)
-    #scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[200, 250, 300], gamma=0.1)  # FIXME
-    time0 = time()
+    with torch.enable_grad():
+        net.train()
+        criterion = nn.CrossEntropyLoss()
+        optimizer = optim.SGD(net.parameters(), lr=lr, momentum=0.9)
+        #scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[200, 250, 300], gamma=0.1)  # FIXME
+        time0 = time()
 
-    for e in range(epochs):
-        running_loss = 0
-        for images, labels in trainloader:
-            optimizer.zero_grad()            
-            output = net.loss(net(images))
-            loss = criterion(output, labels)
-            loss.backward()
-            optimizer.step()        
-            running_loss += loss.item()
-        else:
-            print("Epoch {} - Training loss: {}".format(e, running_loss/len(trainloader)))
+        for e in range(epochs):
+            running_loss = 0
+            for images, labels in trainloader:
+                optimizer.zero_grad()            
+                output = net(images)
+                loss = criterion(output, labels)                
+                loss.backward()
+                optimizer.step()        
+                running_loss += loss.item()
+            else:
+                print("Epoch {} - Training loss: {}".format(e, running_loss/len(trainloader)))
 
-        #scheduler.step()
-        print("Training Time (in minutes) =",(time()-time0)/60)
+            #scheduler.step()
+            print("Training Time (in minutes) =",(time()-time0)/60)
 
     torch.save(net.state_dict(), modelfile)
     return net
 
 
 def allconv():
-    net = train(AllConvNet(3), modelfile='/proj/enigma/jebyrne/cifar_allconv.pth', lr=0.001, epochs=40)
+    net = train(AllConvNet(), modelfile='/proj/enigma/jebyrne/cifar_allconv.pth', lr=0.001, epochs=40)
     validate(net)
 
