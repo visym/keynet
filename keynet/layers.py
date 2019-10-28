@@ -1,6 +1,9 @@
 from torch import nn
 from numpy.linalg import multi_dot 
-import keynet.util
+from keynet.util import torch_affine_augmentation_matrix, sparse_toeplitz_conv2d, sparse_toeplitz_avgpool2d
+import torch
+import numpy as np
+
 
 class KeyedConv2d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride):
@@ -16,11 +19,11 @@ class KeyedConv2d(nn.Module):
                w.shape[1] == self.in_channels and
                w.shape[2] == self.kernel_size and
                b.shape[0] == self.out_channels)
-        self.What = keynet.util.sparse_toeplitz_conv2d(inshape, w, bias=b, stride=self.stride)
+        self.What = sparse_toeplitz_conv2d(inshape, w, bias=b, stride=self.stride)
         self.What = A.dot(self.What.dot(Ainv))
 
-    def forward(self, x):
-        return self.What.dot(x)
+    def forward(self, x_affine):
+        return torch.t(torch.tensor(self.What.dot(torch.t(x_affine))))
 
 
 class KeyedLinear(nn.Module):
@@ -30,13 +33,16 @@ class KeyedLinear(nn.Module):
         self.out_features = out_features
         self.What = None
 
-    def key(self, W, A, Ainv):
+    def key(self, W, b, A, Ainv):
         assert(W.shape[0] == self.out_features and W.shape[1] == self.in_features)
-        self.What = multi_dot( (A, W, Ainv) ) if A is not None else multi_dot( (W, Ainv) )            
+        self.What = torch_affine_augmentation_matrix(torch.tensor(W), torch.tensor(b))
+        self.What = Ainv.dot(np.array(self.What).transpose()).transpose()
+        if A is not None:
+            self.What = A.dot(self.What)
         return self.What
         
-    def forward(self, x):
-        return self.What.dot(x)
+    def forward(self, x_affine):
+        return torch.t(torch.tensor(self.What.dot(torch.t(x_affine))))
 
 
 class KeyedAvgpool2d(nn.Module):
@@ -46,10 +52,10 @@ class KeyedAvgpool2d(nn.Module):
         self.stride = stride
 
     def key(self, A, Ainv, inshape):
-        self.What = keynet.util.sparse_toeplitz_avgpool2d(inshape, (inshape[0],inshape[0],self.kernel_size,self.kernel_size), self.stride)        
+        self.What = sparse_toeplitz_avgpool2d(inshape, (inshape[0],inshape[0],self.kernel_size,self.kernel_size), self.stride)        
         self.What = A.dot(self.What.dot(Ainv))
 
-    def forward(self, x):
-        return self.What.dot(x)
+    def forward(self, x_affine):
+        return torch.t(torch.tensor(self.What.dot(torch.t(x_affine))))
 
 

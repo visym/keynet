@@ -2,6 +2,8 @@ import numpy as np
 import scipy.sparse
 from scipy.sparse import csr_matrix
 from sklearn.preprocessing import normalize
+import torch
+
 
 def sparse_permutation_matrix(n):
     data = np.ones(n).astype(np.float32)
@@ -53,8 +55,7 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1)
     # Valid shapes
     assert(len(inshape) == 3 and len(f.shape) == 4)  # 3D tensor inshape=(inchannels, height, width), f.shape=(outchannels, kernelheight, kernelwidth, inchannels)
     assert(f.shape[1] == inshape[0])  # equal inchannels
-    #assert(f.shape[2]==f.shape[3] and f.shape[2]%2 == 1)  # filter is square, odd
-    assert(f.shape[2]==f.shape[3])  # filter is square
+    assert(f.shape[2]==f.shape[3] and f.shape[2]%2 == 1)  # filter is square, odd (FIXME)
     if bias is not None:
         assert(len(bias.shape) == 1 and bias.shape[0] == f.shape[0])  # filter and bias have composable shapes
 
@@ -65,7 +66,6 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1)
     M_range = range(0,M)
     P_range = range(-((P-1)//2), ((P-1)//2) + 1) if P%2==1 else range(-((P-1)//2), ((P-1)//2) + 2)
     Q_range = range(-((Q-1)//2), ((Q-1)//2) + 1) if P%2==1 else range(-((Q-1)//2), ((Q-1)//2) + 2)
-    print(list(Q_range))
     (data, row_ind, col_ind) = ([],[],[])
 
     # For every image_row
@@ -85,14 +85,15 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1)
                                 row_ind.append( np.ravel_multi_index( (c_outchannel,ku,kv), (M,U//stride,V//stride) ) )
                                 col_ind.append( np.ravel_multi_index( (c_inchannel, u+p, v+q), (C,U,V) ))
 
-    # Sparse matrix with optional bias using affine augmentation as final column
+    # Sparse matrix with optional bias using affine augmentation 
     T = csr_matrix((data, (row_ind, col_ind)), shape=(M*(U//stride)*(V//stride), C*U*V))
     if bias is not None:
         lastcol = csr_matrix(np.array([x*np.ones( (U//stride*V//stride) ) for x in bias]).reshape( (M*(U//stride)*(V//stride),1) ))
-        T = csr_matrix(scipy.sparse.hstack( (T,lastcol) ))
+    else:
+        lastcol = csr_matrix(np.zeros( (T.shape[0],1) ))
+    lastrow = np.zeros(T.shape[1]+1);  lastrow[-1]=1.0;  
+    T = csr_matrix(scipy.sparse.vstack( (scipy.sparse.hstack( (T,lastcol)), csr_matrix(lastrow)) ))
     return T
-
-    # FIXME: this should not include N in rows, given What=(M*U*V x C*U*V), x=Nx(C*U*V) -> y=x*What^T, y=Nx(M*U*V)
 
 
 def torch_avgpool2d_in_scipy(x, kernelsize, stride):
@@ -100,15 +101,15 @@ def torch_avgpool2d_in_scipy(x, kernelsize, stride):
     """x=[BATCH,INCHANNEL,HEIGHT,WIDTH]"""
     """https://pytorch.org/docs/stable/nn.html#torch.nn.AvgPool2d"""
 
-    assert(len(x.shape) == 4)
+    assert(len(x.shape) == 4 and kernelsize%2==1)  # odd kernel size (FIXME)
+
     (N,C,U,V) = (x.shape)
     (P,Q) = (kernelsize,kernelsize)
     F = (1.0 / (kernelsize*kernelsize))*np.ones( (kernelsize,kernelsize) )
-    (rightpad, leftpad) = (((P-1)//2) if P%2==1 else ((P-1)//2)+1, (P-1)//2)
+    (rightpad, leftpad) = ((P-1)//2, (Q-1)//2)
     x_spatialpad = np.pad(x, ( (0,0), (0,0), (leftpad, rightpad), (leftpad,rightpad)), mode='constant', constant_values=0)
     y = np.array([scipy.signal.correlate(x_spatialpad[n,m,:,:], F, mode='valid')[::stride,::stride] for n in range(0,N) for m in range(0,C)])
     return np.reshape(y, (N,C,(U//stride),(V//stride)) )
-    # FIXME: stride offsets
 
 
 def sparse_toeplitz_avgpool2d(inshape, filtershape, stride):
@@ -118,4 +119,22 @@ def sparse_toeplitz_avgpool2d(inshape, filtershape, stride):
     for k in range(0,outchannel):
         F[k,k,:,:] = 1.0 / (filtersize*filtersize)
     return sparse_toeplitz_conv2d(inshape, F, bias=None, stride=stride)
+    
+
+def torch_affine_augmentation_tensor(x):
+    (N,C,U,V) = x.shape
+    return torch.cat( (x.view(N,C*U*V), torch.ones(N,1)), dim=1)
+
+def torch_affine_deaugmentation_tensor(x):
+    (N,K) = x.shape
+    return torch.narrow(x, 1, 0, K-1)
+
+def torch_affine_augmentation_matrix(W,bias=None):
+    (M,N) = W.shape
+    b = torch.zeros(M,0) if bias is None else bias.reshape(M,1)
+    W_affine = torch.cat( (torch.cat( (W,b), dim=1), torch.zeros(1,N+1)), dim=0)
+    W_affine[-1,-1] = 1        
+    return W_affine
+    
+    
     
