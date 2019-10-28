@@ -21,6 +21,11 @@ def sparse_gaussian_random_diagonal_matrix(n,sigma=1):
 def sparse_uniform_random_diagonal_matrix(n,scale=1,eps=1E-6):
     return scipy.sparse.diags(np.array(scale*np.random.rand(n) + eps).astype(np.float32))
 
+def sparse_diagonal_matrix(n):
+    return sparse_uniform_random_diagonal_matrix(n, scale=1, eps=1E-6)
+
+def sparse_inverse_diagonal_matrix(D):
+    return scipy.sparse.diags(1.0 / D.diagonal())
 
 def sparse_random_doubly_stochastic_matrix(n, k):
     A = np.random.rand()*sparse_permutation_matrix(n)
@@ -123,11 +128,11 @@ def sparse_toeplitz_avgpool2d(inshape, filtershape, stride):
 
 def torch_affine_augmentation_tensor(x):
     (N,C,U,V) = x.shape
-    return torch.cat( (x.view(N,C*U*V), torch.ones(N,1)), dim=1)
+    return torch.t(torch.cat( (x.view(N,C*U*V), torch.ones(N,1)), dim=1))
 
 def torch_affine_deaugmentation_tensor(x):
-    (N,K) = x.shape
-    return torch.narrow(x, 1, 0, K-1)
+    (K,N) = x.shape
+    return torch.t(torch.narrow(x, 0, 0, K-1))
 
 def torch_affine_augmentation_matrix(W,bias=None):
     (M,N) = W.shape

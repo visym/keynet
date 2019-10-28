@@ -14,7 +14,7 @@ import torch.nn.functional as F
 import torch 
 import vipy.image  # bash setup
 import vipy.visualize  # bash setup
-from keynet.util import sparse_permutation_matrix, sparse_identity_matrix
+from keynet.util import sparse_permutation_matrix, sparse_identity_matrix, torch_affine_augmentation_tensor, torch_affine_deaugmentation_tensor
 
 def test_generalized_permutation():
     np.set_printoptions(precision=2)
@@ -322,12 +322,13 @@ def test_affine_augmentation():
     from keynet.util import torch_affine_augmentation_tensor, torch_affine_deaugmentation_tensor
     (N,C,U,V) = (2,2,3,3)
     x = torch.tensor(np.random.rand( N,C,U,V ).astype(np.float32))    
+
     x_affine = torch_affine_augmentation_tensor(x)
     x_deaffine = torch_affine_deaugmentation_tensor(x_affine).reshape( N,C,U,V )
     assert(np.allclose(x, x_deaffine))
     print('Affine augmentation (round-trip): passed')    
     
-    x_affine_numpy = np.hstack((np.array(x).reshape(N, C*U*V), np.ones( (N,1) )))
+    x_affine_numpy = np.hstack((np.array(x).reshape(N, C*U*V), np.ones( (N,1) ))).transpose()
     assert(np.allclose(x_affine, x_affine_numpy))
     print('Affine augmentation (torch vs. numpy): passed')    
     
@@ -393,8 +394,12 @@ def test_sparse_toeplitz_avgpool2d():
 def test_keynet_mnist():
     import mnist
 
+    np.random.seed(0)
+    A0 = sparse_permutation_matrix(28*28*1 + 1)
+    A0inv = A0.transpose()
+
     keynet = mnist.KeyNet()
-    keynet.load_state_dict_keyed(torch.load('/proj/enigma/jebyrne/mnist_avgpool.pth'), A0inv=sparse_identity_matrix(28*28*1 + 1))
+    keynet.load_state_dict_keyed(torch.load('/proj/enigma/jebyrne/mnist_avgpool.pth'), A0inv=A0inv)
     keynet.eval()    
 
     net = mnist.LeNet_AvgPool()
@@ -402,18 +407,41 @@ def test_keynet_mnist():
     net.eval()
 
     torch.set_grad_enabled(False)
-    x = torch.tensor(np.random.rand(1,1,28,28).astype(np.float32))
+    x = torch.tensor(np.random.rand(2,1,28,28).astype(np.float32))
     y = net(x)
-    yh = keynet(x)
+    x_keyed_affine = torch.tensor(A0.dot(torch_affine_augmentation_tensor(x)))
+    yh_identity = torch_affine_deaugmentation_tensor(torch.tensor(keynet.keys['A7inv'].dot(keynet(x_keyed_affine))))
     
-    assert(np.allclose(np.array(y), np.array(yh)))
-    print('MNIST keynet: passed')
+    print(y)
+    print(yh_identity)
+    assert(np.allclose(np.array(y), np.array(yh_identity)))
+    print('MNIST IdentityKeyNet: passed')
+
+    keynet = mnist.PermutationKeyNet()
+    keynet.load_state_dict_keyed(torch.load('/proj/enigma/jebyrne/mnist_avgpool.pth'), A0inv=A0inv)
+    keynet.eval()    
+    yh_permutation = torch_affine_deaugmentation_tensor(torch.tensor(keynet.keys['A7inv'].dot(keynet(x_keyed_affine))))
+    assert(np.allclose(np.array(y), np.array(yh_permutation)))
+    print('MNIST PermutationKeyNet: passed')
+    fc3_permutation = keynet.fc3.What
+
+    keynet = mnist.DiagonalKeyNet()
+    keynet.load_state_dict_keyed(torch.load('/proj/enigma/jebyrne/mnist_avgpool.pth'), A0inv=A0inv)
+    keynet.eval()    
+    yh_diagonal = torch_affine_deaugmentation_tensor(torch.tensor(keynet.keys['A7inv'].dot(keynet(x_keyed_affine))))
+    assert(np.allclose(np.array(y), np.array(yh_diagonal)))
+    print('MNIST DiagonalKeyNet: passed')
+    fc3_diagonal = keynet.fc3.What
+
+    assert(not np.allclose(np.array(fc3_permutation), np.array(fc3_diagonal)))
+    print('MNIST PermutationKeyNet vs. DiagonalKeyNet: passed')
+
+
+    keynet = mnist.StochasticKeyNet()
+    keynet.load_state_dict_keyed(torch.load('/proj/enigma/jebyrne/mnist_avgpool.pth'), A0inv=A0inv)
+    keynet.eval()    
+    yh_stochastic = torch_affine_deaugmentation_tensor(torch.tensor(keynet.keys['A7inv'].dot(keynet(x_keyed_affine))))
+    assert(np.allclose(np.array(y), np.array(yh_stochastic)))
+    print('MNIST StochasticKeyNet: passed')
+
     
-
-
-
-
-
-
-
-

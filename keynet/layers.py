@@ -3,7 +3,7 @@ from numpy.linalg import multi_dot
 from keynet.util import torch_affine_augmentation_matrix, sparse_toeplitz_conv2d, sparse_toeplitz_avgpool2d
 import torch
 import numpy as np
-
+import scipy.sparse
 
 class KeyedConv2d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride):
@@ -23,7 +23,8 @@ class KeyedConv2d(nn.Module):
         self.What = A.dot(self.What.dot(Ainv))
 
     def forward(self, x_affine):
-        return torch.t(torch.tensor(self.What.dot(torch.t(x_affine))))
+        """x_affine=(C*U*V+1 x N)"""
+        return torch.tensor(self.What.dot(x_affine))
 
 
 class KeyedLinear(nn.Module):
@@ -36,13 +37,14 @@ class KeyedLinear(nn.Module):
     def key(self, W, b, A, Ainv):
         assert(W.shape[0] == self.out_features and W.shape[1] == self.in_features)
         self.What = torch_affine_augmentation_matrix(torch.tensor(W), torch.tensor(b))
-        self.What = Ainv.dot(np.array(self.What).transpose()).transpose()
+        self.What = np.dot(self.What, Ainv.todense())
         if A is not None:
             self.What = A.dot(self.What)
         return self.What
         
     def forward(self, x_affine):
-        return torch.t(torch.tensor(self.What.dot(torch.t(x_affine))))
+        """x_affine=(C*U*V+1 x N)"""
+        return torch.tensor(self.What.dot(x_affine))
 
 
 class KeyedAvgpool2d(nn.Module):
@@ -56,6 +58,8 @@ class KeyedAvgpool2d(nn.Module):
         self.What = A.dot(self.What.dot(Ainv))
 
     def forward(self, x_affine):
-        return torch.t(torch.tensor(self.What.dot(torch.t(x_affine))))
+        """x_affine=(C*U*V+1 x N)"""
+        return torch.tensor(self.What.dot(x_affine))
+
 
 
