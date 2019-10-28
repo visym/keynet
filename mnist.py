@@ -6,7 +6,8 @@ from torchvision import datasets, transforms
 from torch import nn, optim
 import torch.nn.functional as F
 import keynet.layers
-from keynet.util import sparse_permutation_matrix, sparse_identity_matrix, sparse_uniform_random_diagonal_matrix, sparse_inverse_diagonal_matrix
+from keynet.util import sparse_permutation_matrix, sparse_identity_matrix, sparse_uniform_random_diagonal_matrix, sparse_inverse_diagonal_matrix, torch_affine_augmentation_tensor, torch_affine_deaugmentation_tensor
+import vipy.util
 
 class LeNet(nn.Module):
     """Slightly modified LeNet to include padding, odd filter sizes and even image sizes"""
@@ -34,8 +35,7 @@ class LeNet(nn.Module):
     def loss(self, x):
         return F.log_softmax(x, dim=1)
 
-    @staticmethod
-    def transform():
+    def transform(self):
         return transforms.Compose([transforms.ToTensor(),                                    
                                    transforms.Normalize((0.1307,), (0.3081,))])
 
@@ -107,10 +107,23 @@ class KeyNet(nn.Module):
         x7 = self.fc3(x6)
         return x7
 
-    @staticmethod
-    def transform():
+    def encrypt(self, A0, x):        
+        return torch.tensor(A0.dot(torch_affine_augmentation_tensor(x))) if A0 is not None else x
+
+    def decrypt(self, x):
+        if self.keys['A7inv'] is not None and self.keys['A7'] is not None:
+            return torch_affine_deaugmentation_tensor(torch.tensor(self.keys['A7inv'].dot(x)))
+        else:
+            return torch_affine_deaugmentation_tensor(x)
+
+    def loss(self, x):
+        return F.log_softmax(self.decrypt(x), dim=1)
+
+
+    def transform(self):
         return transforms.Compose([transforms.ToTensor(),                                    
                                    transforms.Normalize((0.1307,), (0.3081,))])
+
 
 class PermutationKeyNet(KeyNet):
     def __init__(self):
@@ -197,33 +210,15 @@ class StochasticKeyNet(KeyNet):
                               'A7inv':sparse_inverse_diagonal_matrix(diagonal_keys['A7'])})
 
         keys = {k:diagonal_keys[k].dot(permutation_keys[k]) if 'inv' not in k else permutation_keys[k].dot(diagonal_keys[k]) for k in permutation_keys.keys()}
+        keys.update( {'A0inv':None} )
 
         super(StochasticKeyNet, self).__init__(keys)
-
-def validate(net, mnistdir='/proj/enigma'):
-    valset = datasets.MNIST(mnistdir, download=True, train=False, transform=net.transform())
-    valloader = torch.utils.data.DataLoader(valset, batch_size=64, shuffle=True)
-    net.eval()
-
-    (total, correct) = (0,0)
-    for images,labels in valloader:
-        for i in range(len(labels)):
-            with torch.no_grad():
-                output = net.loss(net(images))
-
-            _, pred = torch.max(output, 1)
-            #pred = output.argmax(dim=1, keepdim=True) 
-            total += labels.size(0)
-            correct += (pred == labels).sum().item()
-
-    print("Mean classification accuracy = %f" % (correct/total))
 
 
 def train(net, modelfile, mnistdir='/proj/enigma', lr=0.003, epochs=20):
     trainset = datasets.MNIST(mnistdir, download=True, train=True, transform=net.transform())
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=64, shuffle=True)
 
-    #criterion = nn.CrossEntropyLoss()
     criterion = F.nll_loss
     optimizer = optim.SGD(net.parameters(), lr=lr, momentum=0.9)
     time0 = time()
@@ -245,17 +240,39 @@ def train(net, modelfile, mnistdir='/proj/enigma', lr=0.003, epochs=20):
     torch.save(net.state_dict(), modelfile)
     return net
 
+
+def validate(net, mnistdir='/proj/enigma', secretkey=None):
+    valset = datasets.MNIST(mnistdir, download=True, train=False, transform=net.transform())
+    valloader = torch.utils.data.DataLoader(valset, batch_size=64, shuffle=True)
+    net.eval()
+
+    with vipy.util.Stopwatch() as sw:
+        (total, correct) = (0,0)
+        for images,labels in valloader:
+            for i in range(len(labels)):
+                with torch.no_grad():
+                    output = net.loss(net(images if secretkey is None else net.encrypt(secretkey,images)))
+                _, pred = torch.max(output, 1)
+                total += labels.size(0)
+                correct += (pred == labels).sum().item()
+
+    print("Mean classification accuracy = %f" % (correct/total))
+    print('Validation: %s sec' % sw.elapsed)
+
 def lenet():
     net = train(LeNet(), modelfile='/proj/enigma/jebyrne/mnist_lenet.pth', lr=0.003, epochs=20)
     validate(net)
 
+
 def lenet_avgpool():
     net = train(LeNet_AvgPool(), modelfile='/proj/enigma/jebyrne/mnist_lenet_avgpool.pth', lr=0.003, epochs=40)
+    #net = LeNet_AvgPool(); net.load_state_dict(torch.load('/proj/enigma/jebyrne/mnist_lenet_avgpool.pth'))
     validate(net)
 
+
 def keynet_alpha1():
-    net = KeyNet()
-    A0inv = sparse_identity_matrix(28*28*1 + 1)
+    net = PermutationKeyNet()
+    A0 = sparse_permutation_matrix(28*28*1 + 1)
+    A0inv = A0.transpose()
     net.load_state_dict_keyed(torch.load('/proj/enigma/jebyrne/mnist_lenet_avgpool.pth'), A0inv)
-    net.eval()
-    return net
+    validate(net, secretkey=A0)

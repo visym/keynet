@@ -3,7 +3,46 @@ import scipy.sparse
 from scipy.sparse import csr_matrix
 from sklearn.preprocessing import normalize
 import torch
+import PIL
+import uuid
 
+def random_dense_permutation_matrix(n):
+    A = np.eye(n)
+    A = np.random.permutation(A)
+    return A
+
+
+def random_dense_doubly_stochastic_matrix(n,k):
+    A = np.random.rand()*random_dense_permutation_matrix(n)
+    for k in range(0,k):
+        A = A + np.random.rand()*random_dense_permutation_matrix(n)
+    for k in range(0,100):
+        A = A / np.sum(A,axis=0)
+        A = A / np.sum(A,axis=1)        
+    return A
+
+def gaussian_random_dense_diagonal_matrix(n,sigma=1):
+    d = sigma*np.random.randn(n)
+    return (np.diag(d))
+
+def uniform_random_dense_diagonal_matrix(n,scale=1,eps=1E-6):
+    d = scale*np.random.rand(n) + eps
+    return (np.diag(d))
+
+def checkerboard_256x256():
+    img = np.uint8(255*np.random.rand(8,8,3))
+    img = np.array(PIL.Image.fromarray(img).resize( (256,256), PIL.Image.NEAREST))
+    return img
+
+def imshow(img):
+    f = '/tmp/%s.png' % uuid.uuid1().hex
+    im = PIL.Image.fromarray(img.astype(np.uint8)).save(f)
+    os.system('open %s' % f)
+
+def savetemp(img):
+    f = '/tmp/%s.png' % uuid.uuid1().hex
+    PIL.Image.fromarray(img.astype(np.uint8)).save(f)
+    return f
 
 def sparse_permutation_matrix(n):
     data = np.ones(n).astype(np.float32)
@@ -127,7 +166,11 @@ def sparse_toeplitz_avgpool2d(inshape, filtershape, stride):
     
 
 def torch_affine_augmentation_tensor(x):
-    (N,C,U,V) = x.shape
+    if len(x.shape) == 4:
+        (N,C,U,V) = x.shape
+    else:
+        (C,U,V) = x.shape
+        N = 1
     return torch.t(torch.cat( (x.view(N,C*U*V), torch.ones(N,1)), dim=1))
 
 def torch_affine_deaugmentation_tensor(x):
