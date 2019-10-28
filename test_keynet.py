@@ -320,23 +320,25 @@ def optical_transformation_montage():
 def test_sparse_toeplitz_conv2d():
     from keynet.util import sparse_toeplitz_conv2d, torch_conv2d_in_scipy
 
-    (N,C,U,V) = (2,3,9,16)
+    stride = 2
+    (N,C,U,V) = (2,3,8,16)
     (M,C,P,Q) = (4,3,3,3)
     img = np.random.rand(N,C,U,V)
     f = np.random.randn(M,C,P,Q)
     b = np.random.randn(M).flatten()
+    assert(U%2==0 and V%2==0 and (stride==1 or stride==2) and P%2==1 and Q%2==1)
 
     # Toeplitz matrix
-    T = sparse_toeplitz_conv2d( (C,U,V), f, b, as_correlation=True)
-    yh = T.dot(np.hstack((img.reshape(N,C*U*V), np.ones( (N,1) ))).transpose()).transpose().reshape(N,M,U,V)
+    T = sparse_toeplitz_conv2d( (C,U,V), f, b, as_correlation=True, stride=stride)
+    yh = T.dot(np.hstack((img.reshape(N,C*U*V), np.ones( (N,1) ))).transpose()).transpose().reshape(N,M,U//stride,V//stride)
 
     # Spatial convolution:  torch replicated in scipy
-    y_scipy = torch_conv2d_in_scipy(img, f, b)
+    y_scipy = torch_conv2d_in_scipy(img, f, b, stride=stride)
     assert(np.allclose(y_scipy, yh))
     print('Correlation (scipy vs. toeplitz): passed')    
 
     # Torch spatial correlation: reshape torch to be tensor sized [BATCH x CHANNEL x HEIGHT x WIDTH]
-    y_torch = F.conv2d(torch.tensor(img), torch.tensor(f), bias=torch.tensor(b), padding=((P-1)//2, (Q-1)//2))
+    y_torch = F.conv2d(torch.tensor(img), torch.tensor(f), bias=torch.tensor(b), padding=((P-1)//2, (Q-1)//2), stride=stride)
     assert(np.allclose(y_torch,yh))
     print('Correlation (torch vs. toeplitz): passed')
 
@@ -348,9 +350,10 @@ def test_sparse_toeplitz_avgpool2d():
 
     np.random.seed(0)
     (N,C,U,V) = (1,1,6,6)
-    (kernelsize, stride) = (3,2)
+    (kernelsize, stride) = (2,1)
     (P,Q) = (kernelsize,kernelsize)
     img = np.random.rand(N,C,U,V)
+    assert(U%2==0 and V%2==0 and (stride==1 or stride==2) and kernelsize<=4)
 
     # Toeplitz matrix
     T = sparse_toeplitz_avgpool2d( (C,U,V), (C,C,kernelsize,kernelsize), stride=stride)
@@ -358,14 +361,17 @@ def test_sparse_toeplitz_avgpool2d():
 
     # Average pooling
     y_scipy = torch_avgpool2d_in_scipy(img, kernelsize, stride)
-    #print(y_scipy)
+    print(y_scipy)
+    print(yh)
 
     assert(np.allclose(y_scipy, yh))
     print('Average pool 2D (scipy vs. toeplitz): passed')    
 
     # Torch avgpool
-    y_torch = F.avg_pool2d(torch.tensor(img), kernelsize, stride=stride, padding=((P-1)//2, (Q-1)//2))
-    #print(y_torch)
+    #y_torch = F.avg_pool2d(torch.tensor(img), kernelsize, stride=stride, padding=((P-1)//2, (Q-1)//2))
+    y_torch = F.avg_pool2d(torch.tensor(img), kernelsize, stride=stride, padding=0)
+    print(y_torch)
+    print(yh)
     assert(np.allclose(y_torch,yh))
     print('Average pool 2D (torch vs. toeplitz): passed')
 
@@ -374,6 +380,25 @@ def test_sparse_toeplitz_avgpool2d():
 
     #return T
 
+
+def test_keynet_mnist():
+    import mnist
+
+    keynet = mnist.KeyNet()
+    keynet.load_state_dict_keyed(torch.load('/proj/enigma/jebyrne/mnist_avgpool.pth'), A0=None)
+    keynet.eval()    
+
+    net = mnist.Net_AvgPool()
+    net.load_state_dict(torch.load('/proj/enigma/jebyrne/mnist_avgpool.pth'))
+    net.eval()
+
+    torch.set_grad_enabled(False)
+    x = torch.tensor(np.random.rand(1,1,28,28).astype(np.float32))
+    y = net(x)
+    yh = keynet(x)
+    
+    assert(np.allclose(np.array(y), np.array(yh)))
+    print('MNIST keynet: passed')
     
 
 

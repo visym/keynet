@@ -109,7 +109,7 @@ def validate(net, cifardir='/proj/enigma', modelfile='/proj/enigma/jebyrne/cifar
     print("Mean classification accuracy = %f" % (correct/total))
 
 
-def train(net, cifardir='/proj/enigma', modelfile='/proj/enigma/jebyrne/cifar10.pth', epochs=40, lr=0.001):
+def train(net, modelfile, cifardir='/proj/enigma', epochs=40, lr=0.001):
     """https://github.com/pytorch/examples/tree/master/mnist"""
     trainset = torchvision.datasets.CIFAR10(root=cifardir, train=True, download=True, transform=net.transform())
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=4, shuffle=True, num_workers=2)
@@ -138,14 +138,13 @@ def train(net, cifardir='/proj/enigma', modelfile='/proj/enigma/jebyrne/cifar10.
         print("Training Time (in minutes) =",(time()-time0)/60)
 
     torch.save(net.state_dict(), modelfile)
-
+    return net
 
 
 def lenet():
-    train(net=LeNet(), modelfile='/proj/enigma/jebyrne/cifar.pth', lr=0.001, epochs=80)
-    validate(net=LeNet(),  modelfile='/proj/enigma/jebyrne/cifar.pth')
-
+    net = train(LeNet(), modelfile='/proj/enigma/jebyrne/cifar_lenet.pth', lr=0.001, epochs=80)
+    validate(net)
 
 def allconv():
-    train(net=AllConvNet(3), modelfile='/proj/enigma/jebyrne/cifar_allconv.pth', lr=0.001, epochs=350)
-    validate(net=AllConvNet(3),  modelfile='/proj/enigma/jebyrne/cifar_allconv.pth')
+    net = train(AllConvNet(3), modelfile='/proj/enigma/jebyrne/cifar_allconv.pth', lr=0.001, epochs=350)
+    validate(net)

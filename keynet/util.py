@@ -30,7 +30,7 @@ def sparse_random_doubly_stochastic_matrix(n, k):
     return A
 
 
-def torch_conv2d_in_scipy(x,f,b):
+def torch_conv2d_in_scipy(x,f,b,stride=1):
     """Torch equivalent conv2d operation in scipy, with input tensor x, filter weight f and bias b"""
     """x=[BATCH,INCHANNEL,HEIGHT,WIDTH], f=[OUTCHANNEL,INCHANNEL,HEIGHT,WIDTH], b=[OUTCHANNEL,1]"""
 
@@ -42,8 +42,8 @@ def torch_conv2d_in_scipy(x,f,b):
     (N,C,U,V) = (x.shape)
     (M,K,P,Q) = (f.shape)
     x_spatialpad = np.pad(x, ( (0,0), (0,0), ((P-1)//2, (P-1)//2), ((Q-1)//2, (Q-1)//2)), mode='constant', constant_values=0)
-    y = np.array([scipy.signal.correlate(x_spatialpad[n,:,:,:], f[m,:,:,:], mode='valid') + b[m] for n in range(0,N) for m in range(0,M)])
-    return np.reshape(y, (N,M,U,V) )
+    y = np.array([scipy.signal.correlate(x_spatialpad[n,:,:,:], f[m,:,:,:], mode='valid')[:,::stride,::stride] + b[m] for n in range(0,N) for m in range(0,M)])
+    return np.reshape(y, (N,M,U//stride,V//stride) )
 
 
 def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1):
@@ -63,8 +63,9 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1)
     (M,C,P,Q) = f.shape
     C_range = range(0,C)
     M_range = range(0,M)
-    P_range = range(-(P-1)//2, ((P-1)//2)+1)
-    Q_range = range(-(Q-1)//2, ((Q-1)//2)+1)
+    P_range = range(-((P-1)//2), ((P-1)//2) + 1) if P%2==1 else range(-((P-1)//2), ((P-1)//2) + 2)
+    Q_range = range(-((Q-1)//2), ((Q-1)//2) + 1) if P%2==1 else range(-((Q-1)//2), ((Q-1)//2) + 2)
+    print(list(Q_range))
     (data, row_ind, col_ind) = ([],[],[])
 
     # For every image_row
@@ -87,7 +88,7 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1)
     # Sparse matrix with optional bias using affine augmentation as final column
     T = csr_matrix((data, (row_ind, col_ind)), shape=(M*(U//stride)*(V//stride), C*U*V))
     if bias is not None:
-        lastcol = csr_matrix(np.array([x*np.ones( (U*V) ) for x in bias]).reshape( (M*(U//stride)*(V//stride),1) ))
+        lastcol = csr_matrix(np.array([x*np.ones( (U//stride*V//stride) ) for x in bias]).reshape( (M*(U//stride)*(V//stride),1) ))
         T = csr_matrix(scipy.sparse.hstack( (T,lastcol) ))
     return T
 
@@ -103,7 +104,7 @@ def torch_avgpool2d_in_scipy(x, kernelsize, stride):
     (N,C,U,V) = (x.shape)
     (P,Q) = (kernelsize,kernelsize)
     F = (1.0 / (kernelsize*kernelsize))*np.ones( (kernelsize,kernelsize) )
-    (rightpad, leftpad) = ((P-1)//2, ((P-1)//2) if P%2!=0 else ((P-1)//2)+1)
+    (rightpad, leftpad) = (((P-1)//2) if P%2==1 else ((P-1)//2)+1, (P-1)//2)
     x_spatialpad = np.pad(x, ( (0,0), (0,0), (leftpad, rightpad), (leftpad,rightpad)), mode='constant', constant_values=0)
     y = np.array([scipy.signal.correlate(x_spatialpad[n,m,:,:], F, mode='valid')[::stride,::stride] for n in range(0,N) for m in range(0,C)])
     return np.reshape(y, (N,C,(U//stride),(V//stride)) )
