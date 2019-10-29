@@ -11,42 +11,42 @@ class AllConvNet(nn.Module):
     """https://github.com/StefOe/all-conv-pytorch/blob/master/cifar10.ipynb"""
     def __init__(self, n_classes=10, **kwargs):
         super(AllConvNet, self).__init__()
-        self.dropout0 = nn.Dropout(p=0.0) 
+        self.dropout0 = nn.Dropout(p=0.2) 
         self.conv1 = nn.Conv2d(3, 4, 3, padding=1)  # TESTING: channels
         self.conv2 = nn.Conv2d(4, 4, 3, padding=1)
         self.conv3 = nn.Conv2d(4, 4, 3, padding=1, stride=2)
-        self.dropout3 = nn.Dropout(p=0.0) 
-        self.conv4 = nn.Conv2d(4, 9, 3, padding=1)
-        self.conv5 = nn.Conv2d(9, 9, 3, padding=1)
-        self.conv6 = nn.Conv2d(9, 9, 3, padding=1, stride=2)
-        self.dropout6 = nn.Dropout(p=0.0) 
-        self.conv7 = nn.Conv2d(9, 9, 3, padding=1)
-        self.conv8 = nn.Conv2d(9, 9, 1)
-        self.class_conv = nn.Conv2d(9, n_classes, 1)
+        self.dropout3 = nn.Dropout(p=0.5) 
+        self.conv4 = nn.Conv2d(4, 4, 3, padding=1)
+        self.conv5 = nn.Conv2d(4, 4, 3, padding=1)
+        self.conv6 = nn.Conv2d(4, 4, 3, padding=1, stride=2)
+        self.dropout6 = nn.Dropout(p=0.5) 
+        self.conv7 = nn.Conv2d(4, 4, 3, padding=1)
+        self.conv8 = nn.Conv2d(4, 4, 1)
+        self.class_conv = nn.Conv2d(4, n_classes, 1)
         self.fc3 = nn.Linear(10*8*8, 500)
         self.fc4 = nn.Linear(500, 100)
         self.fc5 = nn.Linear(100, 10)
 
     def forward(self, x):
-        #x_drop = self.dropout0(x)                         # (3,32,32) -> (3,32,32)
-        x_drop = x
+        x_drop = self.dropout0(x)                         # (3,32,32) -> (3,32,32)
+        #x_drop = x
         conv1_out = F.relu(self.conv1(x_drop))            # (3,32,32) -> (96,32,32)
         conv2_out = F.relu(self.conv2(conv1_out))         # (96,32,32) -> (96,32,32)
         conv3_out = F.relu(self.conv3(conv2_out))         # (96,32,32) -> (96,16,16)
-        #conv3_out_drop = self.dropout3(conv3_out)         # (96,16,16) -> (96,16,16)
-        conv3_out_drop = conv3_out
+        conv3_out_drop = self.dropout3(conv3_out)         # (96,16,16) -> (96,16,16)
+        #conv3_out_drop = conv3_out
         conv4_out = F.relu(self.conv4(conv3_out_drop))    # (96,16,16) -> (192,16,16)
         conv5_out = F.relu(self.conv5(conv4_out))         # (192,16,16) -> (192,16,16) 
         conv6_out = F.relu(self.conv6(conv5_out))         # (192,16,16) -> (192,8,8) 
-        #conv6_out_drop = self.dropout6(conv6_out)         # (192,8,8) -> (192,8,8)
-        conv6_out_drop = conv6_out
+        conv6_out_drop = self.dropout6(conv6_out)         # (192,8,8) -> (192,8,8)
+        #conv6_out_drop = conv6_out
         conv7_out = F.relu(self.conv7(conv6_out_drop))    # (192,8,8) -> (192,8,8)
         conv8_out = F.relu(self.conv8(conv7_out))         # (192,8,8) -> (192,8,8)
         class_out = F.relu(self.class_conv(conv8_out))    # (192,8,8) -> (10,8,8)
         x = class_out.view(-1, 10*8*8)                    # (10,8,8) -> (16*7*7,1)
         x = F.relu(self.fc3(x))                                   # This is not exactly an all-conv...
         x = F.relu(self.fc4(x))                                   # This is not exactly an all-conv...
-        x = F.relu(self.fc5(x))                                   # This is not exactly an all-conv...
+        x = self.fc5(x)                                   # This is not exactly an all-conv...
         return x
 
     @staticmethod
@@ -195,7 +195,7 @@ class StochasticKeyNet(AllConvNet):
 
 def validate(net, cifardir='/proj/enigma', secretkey=None):
     testset = torchvision.datasets.CIFAR10(root=cifardir, train=False, download=True, transform=net.transform_test())
-    testloader = torch.utils.data.DataLoader(testset, batch_size=4, shuffle=False, num_workers=2)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=4, shuffle=False, num_workers=1)
     net.eval()
 
     (total, correct) = (0,0)
@@ -213,7 +213,7 @@ def validate(net, cifardir='/proj/enigma', secretkey=None):
 
 def train(net, modelfile, cifardir='/proj/enigma', epochs=40, lr=0.001):
     trainset = torchvision.datasets.CIFAR10(root=cifardir, train=True, download=True, transform=net.transform_train())
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=2)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=1)
     classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
     
     net.train()
@@ -244,7 +244,7 @@ def train(net, modelfile, cifardir='/proj/enigma', epochs=40, lr=0.001):
 
 
 def allconv():
-    net = train(AllConvNet(), modelfile='./models/cifar_allconv.pth', lr=0.001, epochs=40)
+    net = train(AllConvNet(), modelfile='./models/cifar_allconv.pth', lr=0.001, epochs=350)
     #net = train(keynet.mnist.LeNet_AvgPool(), modelfile='./models/cifar_allconv.pth', lr=0.001, epochs=40)
     validate(net)
 
