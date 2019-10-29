@@ -62,4 +62,18 @@ class KeyedAvgpool2d(nn.Module):
         return torch.tensor(self.What.dot(x_affine))
 
 
+def fuse_conv2d_and_bn(conv2d_weight, conv2d_bias, bn_running_mean, bn_running_var, bn_eps, bn_weight, bn_bias):
+    """https://discuss.pytorch.org/t/how-to-absorb-batch-norm-layer-weights-into-convolution-layer-weights/16412/4"""
+    w = conv2d_weight
+    mean = bn_running_mean
+    var_sqrt = torch.sqrt(bn_running_var + bn_eps)
+    beta = bn_weight
+    gamma = bn_bias
+    if conv2d_bias is not None:
+        b = conv2d_bias
+    else:
+        b = mean.new_zeros(mean.shape)
+    w = w * (beta / var_sqrt)
+    b = (b - mean)/var_sqrt * beta + gamma
+    return (w,b)
 
