@@ -77,7 +77,7 @@ class StochasticKeyNet(AllConvNet):
         self.conv5 = keynet.layers.KeyedConv2d(192, 192, kernel_size=3, stride=1)  # assumed padding=1
         self.conv6 = keynet.layers.KeyedConv2d(192, 192, kernel_size=3, stride=2)  # assumed padding=1
         self.conv7 = keynet.layers.KeyedConv2d(192, 192, kernel_size=3, stride=1)  # assumed padding=1
-        self.conv8 = keynet.layers.KeyedConv2d(192, 192, kernel_size=3, stride=1)  # assumed padding=1
+        self.conv8 = keynet.layers.KeyedConv2d(192, 192, kernel_size=1, stride=1)  # assumed padding=1
         self.conv9 = keynet.layers.KeyedConv2d(192, 10, kernel_size=3, stride=1)  # assumed padding=1
         self.fc1 = keynet.layers.KeyedLinear(10*8*8, 100)  
         self.fc2 = keynet.layers.KeyedLinear(100, 10)  

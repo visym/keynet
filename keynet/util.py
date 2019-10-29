@@ -9,6 +9,12 @@ import tempfile
 import os
 
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+def count_keynet_parameters(model):
+    return np.sum([layer.What.nnz() for layer in model.children() if 'What' in layer])
+
 def random_dense_permutation_matrix(n):
     A = np.eye(n)
     A = np.random.permutation(A)

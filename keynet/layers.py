@@ -69,11 +69,12 @@ def fuse_conv2d_and_bn(conv2d_weight, conv2d_bias, bn_running_mean, bn_running_v
     var_sqrt = torch.sqrt(bn_running_var + bn_eps)
     beta = bn_weight
     gamma = bn_bias
+    out_channels = conv2d_weight.shape[0]
     if conv2d_bias is not None:
         b = conv2d_bias
     else:
         b = mean.new_zeros(mean.shape)
-    w = w * (beta / var_sqrt)
+    w = w * (beta / var_sqrt).reshape([out_channels, 1, 1, 1])
     b = (b - mean)/var_sqrt * beta + gamma
     return (w,b)
 
