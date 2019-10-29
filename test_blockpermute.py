@@ -40,7 +40,7 @@ def test_corner_permute():
     imshow(img_permuted)
     
     
-def test_image_permute(imgfile="/Users/jeffrey.byrne/Desktop/visym_logo_whitebg_notext.png"):
+def test_image_permute(imgfile):
     img = np.array(PIL.Image.open(imgfile).resize( (256,256) ))        
     mask = block_permutation_mask(256, 4, minscale=4)
     img_permuted = block_permute(img, mask)
@@ -48,7 +48,7 @@ def test_image_permute(imgfile="/Users/jeffrey.byrne/Desktop/visym_logo_whitebg_
     imshow(img_permuted)
 
 
-def test_vgg16_permute(imgfile="/Users/jeffrey.byrne/Desktop/visym_logo_whitebg_notext.png"):
+def test_vgg16_permute(imgfile):
     # The input image must be 243x243, you will need to center crop your 256x256 images to 243x243
     img = np.array(PIL.Image.open(imgfile).resize( (243,243) ))
 
@@ -66,14 +66,14 @@ def test_vgg16_permute(imgfile="/Users/jeffrey.byrne/Desktop/visym_logo_whitebg_
     return img_cropped
     
 
-def test_256x256_local_block_permutation(imgfile="/Users/jeffrey.byrne/Desktop/jebyrne.jpg"):
+def test_256x256_local_block_permutation(imgfile='owl.jpg'):
     # The mask should have a subblock size of 2x2, with six levels.  The top levels are not permuted, the bottom level is permuted
     img = np.array(PIL.Image.open(imgfile).resize( (256,256) ))
     mask = local_permutation_mask(256, 2, minscale=4, identityscale=5)
     img_permuted = block_permute(img, mask)
     imshow(img_permuted)
 
-def test_256x256_global_block_permutation(imgfile="/Users/jeffrey.byrne/Desktop/jebyrne.jpg"):
+def test_256x256_global_block_permutation(imgfile='owl.jpg'):
     # The mask should have a subblock size of 2x2, with two levels.  The top level is permuted, the second level is not permuted
     # This is equivalent to the block_permutation with one level
     img = np.array(PIL.Image.open(imgfile).resize( (256,256) ))
@@ -81,7 +81,7 @@ def test_256x256_global_block_permutation(imgfile="/Users/jeffrey.byrne/Desktop/
     img_permuted = block_permute(img, mask)
     imshow(img_permuted)
     
-def test_vgg16_local_block_permutation(imgfile="/Users/jeffrey.byrne/Desktop/jebyrne.jpg"):
+def test_vgg16_local_block_permutation(imgfile='owl.jpg'):
     img = np.array(PIL.Image.open(imgfile).resize( (243,243) ))
     mask = local_permutation_mask(243, 3, minscale=3, identityscale=4)
 

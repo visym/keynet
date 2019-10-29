@@ -5,12 +5,14 @@ from sklearn.preprocessing import normalize
 import torch
 import PIL
 import uuid
+import tempfile
+import os
+
 
 def random_dense_permutation_matrix(n):
     A = np.eye(n)
     A = np.random.permutation(A)
     return A
-
 
 def random_dense_doubly_stochastic_matrix(n,k):
     A = np.random.rand()*random_dense_permutation_matrix(n)
@@ -30,12 +32,14 @@ def uniform_random_dense_diagonal_matrix(n,scale=1,eps=1E-6):
     return (np.diag(d))
 
 def checkerboard_256x256():
+    """Random color 8x8 checkerboard at 256x256 resolution"""
     img = np.uint8(255*np.random.rand(8,8,3))
     img = np.array(PIL.Image.fromarray(img).resize( (256,256), PIL.Image.NEAREST))
     return img
 
 def imshow(img):
-    f = '/tmp/%s.png' % uuid.uuid1().hex
+    """Use system viewer for uint8 image saved as temporary png"""
+    f = os.path.join(tempfile.getempdir(),'%s.png' % uuid.uuid1().hex)
     im = PIL.Image.fromarray(img.astype(np.uint8)).save(f)
     os.system('open %s' % f)
 
@@ -52,7 +56,6 @@ def sparse_permutation_matrix(n):
 
 def sparse_identity_matrix(n):
     return scipy.sparse.eye(n, dtype=np.float32)
-
 
 def sparse_gaussian_random_diagonal_matrix(n,sigma=1):
     return scipy.sparse.diags(np.array(sigma*np.random.randn(n)).astype(np.float32))

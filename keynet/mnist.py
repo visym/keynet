@@ -36,7 +36,13 @@ class LeNet(nn.Module):
         return F.log_softmax(x, dim=1)
 
     def transform(self):
-        return transforms.Compose([transforms.ToTensor(),                                    
+        return transforms.Compose([transforms.ToTensor(),        
+                                   transforms.Normalize((0.1307,), (0.3081,))])
+    def transform_train(self):
+        # TESTING
+        return transforms.Compose([transforms.Grayscale(),
+                                   transforms.Resize( (28,28) ),
+                                   transforms.ToTensor(),        
                                    transforms.Normalize((0.1307,), (0.3081,))])
 
 class LeNet_AvgPool(LeNet):

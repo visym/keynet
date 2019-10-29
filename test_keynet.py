@@ -14,11 +14,12 @@ from keynet.util import sparse_toeplitz_avgpool2d, torch_avgpool2d_in_scipy
 from keynet.util import sparse_diagonal_matrix, sparse_inverse_diagonal_matrix
 import keynet.util
 import keynet.blockpermute
-import mnist
+import keynet.mnist
+import keynet.cifar10
 
 
 def example_2x2():
-
+    """Reproduce figure 2 in paper"""
     np.random.seed(0)
 
     img = np.array([[11,12],[21,22]]).astype(np.float32)
@@ -82,7 +83,7 @@ def example_2x2():
 
 def optical_transformation_montage():
     (m,n) = (256,256)
-    img = np.array(PIL.Image.open('/proj/enigma/jebyrne/jebyrne_cropped.jpg').resize( (256,256) ))
+    img = np.array(PIL.Image.open('owl.jpg').resize( (256,256) ))
 
     D = [np.maximum(1E-6, 1.0 + (s*np.random.rand( m,n,3 )-(s/2.0))) for s in [0.1, 1.0, 10000.0]]
     B = [255*np.maximum(1E-6, s*np.random.rand( m,n,3 )) for s in [0.1, 1.0, 10000.0]]
@@ -182,8 +183,8 @@ def test_keynet_mnist():
     np.random.seed(0)
 
     # LeNet
-    net = mnist.LeNet_AvgPool()
-    net.load_state_dict(torch.load('/proj/enigma/jebyrne/mnist_avgpool.pth'))
+    net = keynet.mnist.LeNet_AvgPool()
+    net.load_state_dict(torch.load('./models/mnist_avgpool.pth'))
     net.eval()
     x = torch.tensor(np.random.rand(2,1,28,28).astype(np.float32))
     y = net(x)
@@ -191,8 +192,8 @@ def test_keynet_mnist():
     # Identity KeyNet
     A0 = sparse_identity_matrix(28*28*1 + 1)
     A0inv = A0
-    keynet = mnist.KeyNet()
-    keynet.load_state_dict_keyed(torch.load('/proj/enigma/jebyrne/mnist_avgpool.pth'), A0inv=A0inv)
+    keynet = keynet.mnist.KeyNet()
+    keynet.load_state_dict_keyed(torch.load('./models/mnist_avgpool.pth'), A0inv=A0inv)
     keynet.eval()    
     yh_identity = keynet.decrypt(keynet(keynet.encrypt(A0, x)))
     assert(np.allclose(np.array(y), np.array(yh_identity)))
@@ -201,8 +202,8 @@ def test_keynet_mnist():
     # Permutation KeyNet
     A0 = sparse_permutation_matrix(28*28*1 + 1)
     A0inv = A0.transpose()
-    keynet = mnist.PermutationKeyNet()
-    keynet.load_state_dict_keyed(torch.load('/proj/enigma/jebyrne/mnist_avgpool.pth'), A0inv=A0inv)
+    keynet = keynet.mnist.PermutationKeyNet()
+    keynet.load_state_dict_keyed(torch.load('./models/mnist_avgpool.pth'), A0inv=A0inv)
     keynet.eval()    
     yh_permutation = keynet.decrypt(keynet(keynet.encrypt(A0, x)))
     fc3_permutation = keynet.fc3.What
@@ -212,8 +213,8 @@ def test_keynet_mnist():
     # Diagonal KeyNet
     A0 = sparse_diagonal_matrix(28*28*1 + 1)
     A0inv = sparse_inverse_diagonal_matrix(A0)
-    keynet = mnist.DiagonalKeyNet()
-    keynet.load_state_dict_keyed(torch.load('/proj/enigma/jebyrne/mnist_avgpool.pth'), A0inv=A0inv)
+    keynet = keynet.mnist.DiagonalKeyNet()
+    keynet.load_state_dict_keyed(torch.load('./models/mnist_avgpool.pth'), A0inv=A0inv)
     keynet.eval()    
     yh_diagonal = keynet.decrypt(keynet(keynet.encrypt(A0, x)))
     fc3_diagonal = keynet.fc3.What
@@ -227,8 +228,8 @@ def test_keynet_mnist():
     # Stochastic KeyNet
     A0 = sparse_diagonal_matrix(28*28*1 + 1)
     A0inv = sparse_inverse_diagonal_matrix(A0)
-    keynet = mnist.StochasticKeyNet()
-    keynet.load_state_dict_keyed(torch.load('/proj/enigma/jebyrne/mnist_avgpool.pth'), A0inv=A0inv)
+    keynet = keynet.mnist.StochasticKeyNet()
+    keynet.load_state_dict_keyed(torch.load('./models/mnist_avgpool.pth'), A0inv=A0inv)
     keynet.eval()    
     yh_stochastic = keynet.decrypt(keynet(keynet.encrypt(A0, x)))
     assert(np.allclose(np.array(y), np.array(yh_stochastic)))
@@ -240,8 +241,8 @@ def test_keynet_cifar():
     np.random.seed(0)
 
     # AllConvNet
-    net = cifar10.AllConvNet()
-    net.load_state_dict(torch.load('/proj/enigma/jebyrne/cifar10_allconv.pth'))
+    net = keynet.cifar10.AllConvNet()
+    net.load_state_dict(torch.load('./models/cifar10_allconv.pth'))
     net.eval()
     x = torch.tensor(np.random.rand(2,3,32,32).astype(np.float32))
     y = net(x)
@@ -249,8 +250,8 @@ def test_keynet_cifar():
     # StochasticKeyNet
     A0 = sparse_permutation_matrix(3*32*32 + 1)
     A0inv = A0.transpose()
-    keynet = cifar.StochasticKeyNet()
-    keynet.load_state_dict_keyed(torch.load('/proj/enigma/jebyrne/cifar10_allconv.pth'), A0inv=A0inv)
+    keynet = keynet.cifar.StochasticKeyNet()
+    keynet.load_state_dict_keyed(torch.load('./models/cifar10_allconv.pth'), A0inv=A0inv)
     keynet.eval()    
     yh = keynet.decrypt(keynet(keynet.encrypt(A0, x)))
     assert(np.allclose(np.array(y), np.array(yh)))
