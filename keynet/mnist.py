@@ -108,7 +108,7 @@ class KeyNet(nn.Module):
         x2 = self.pool1(x1)
         x3 = F.relu(self.conv2(x2))
         x4 = self.pool2(x3)
-        x5 = F.relu(self.fc1(x4.view(7*7*16+1, -1)))
+        x5 = F.relu(self.fc1(x4.view(7*7*16+1, -1)))  # reshape transposed
         x6 = F.relu(self.fc2(x5))
         x7 = self.fc3(x6)
         return x7

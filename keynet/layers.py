@@ -66,7 +66,7 @@ def fuse_conv2d_and_bn(conv2d_weight, conv2d_bias, bn_running_mean, bn_running_v
     """https://discuss.pytorch.org/t/how-to-absorb-batch-norm-layer-weights-into-convolution-layer-weights/16412/4"""
     w = conv2d_weight
     mean = bn_running_mean
-    var_sqrt = torch.sqrt(bn_running_var + bn_eps)
+    var_sqrt = torch.sqrt(bn_running_var + np.float32(bn_eps))
     beta = bn_weight
     gamma = bn_bias
     out_channels = conv2d_weight.shape[0]
@@ -75,6 +75,6 @@ def fuse_conv2d_and_bn(conv2d_weight, conv2d_bias, bn_running_mean, bn_running_v
     else:
         b = mean.new_zeros(mean.shape)
     w = w * (beta / var_sqrt).reshape([out_channels, 1, 1, 1])
-    b = (b - mean)/var_sqrt * beta + gamma
+    b = (((b - mean)/var_sqrt)*beta) + gamma
     return (w,b)
 

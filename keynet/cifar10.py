@@ -32,23 +32,23 @@ class AllConvNet(nn.Module):
         self.fc2 = nn.Linear(100, 10)
 
     def forward(self, x):
-        x_drop = self.dropout0(x)                         # (3,32,32) -> (3,32,32)
-        conv1_out = F.relu(self.conv1(x_drop))            # (3,32,32) -> (96,32,32)
-        conv2_out = F.relu(self.conv2(conv1_out))         # (96,32,32) -> (96,32,32)
-        conv3_out = F.relu(self.conv3(conv2_out))         # (96,32,32) -> (96,16,16)
-        conv3_out_bn = self.conv3_bn(conv3_out)           #
-        conv3_out_drop = self.dropout3(conv3_out_bn)      # 
-        conv4_out = F.relu(self.conv4(conv3_out_drop))    # (96,16,16) -> (192,16,16)
-        conv5_out = F.relu(self.conv5(conv4_out))         # (192,16,16) -> (192,16,16) 
-        conv6_out = F.relu(self.conv6(conv5_out))         # (192,16,16) -> (192,8,8) 
-        conv6_out_bn = self.conv6_bn(conv6_out)           # 
-        conv6_out_drop = self.dropout6(conv6_out_bn)      # 
-        conv7_out = F.relu(self.conv7(conv6_out_drop))    # (192,8,8) -> (192,8,8)
-        conv8_out = F.relu(self.conv8(conv7_out))         # (192,8,8) -> (192,8,8)
-        conv9_out = F.relu(self.conv9(conv8_out))         # (192,8,8) -> (10,8,8)
-        x = conv9_out.view(-1, 10*8*8)                    # (10,8,8) -> (10*8*8,1)
-        x = F.relu(self.fc1(x))                           # This is not exactly an all-conv...
-        x = self.fc2(x)                                   # This is not exactly an all-conv...
+        x_drop = self.dropout0(x)                            # (3,32,32) -> (3,32,32)
+        conv1_out = F.relu(self.conv1(x_drop))               # (3,32,32) -> (96,32,32)
+        conv2_out = F.relu(self.conv2(conv1_out))            # (96,32,32) -> (96,32,32)
+        conv3_out = self.conv3(conv2_out)                    # (96,32,32) -> (96,16,16)
+        conv3_out_bn = self.conv3_bn(conv3_out)              #
+        conv3_out_drop = F.relu(self.dropout3(conv3_out_bn)) # 
+        conv4_out = F.relu(self.conv4(conv3_out_drop))       # (96,16,16) -> (192,16,16)
+        conv5_out = F.relu(self.conv5(conv4_out))            # (192,16,16) -> (192,16,16) 
+        conv6_out = self.conv6(conv5_out)                    # (192,16,16) -> (192,8,8) 
+        conv6_out_bn = self.conv6_bn(conv6_out)              # 
+        conv6_out_drop = F.relu(self.dropout6(conv6_out_bn)) # 
+        conv7_out = F.relu(self.conv7(conv6_out_drop))       # (192,8,8) -> (192,8,8)
+        conv8_out = F.relu(self.conv8(conv7_out))            # (192,8,8) -> (192,8,8)
+        conv9_out = F.relu(self.conv9(conv8_out))            # (192,8,8) -> (10,8,8)
+        x = conv9_out.view(-1, 10*8*8)                       # (10,8,8) -> (10*8*8,1)
+        x = F.relu(self.fc1(x))                              # This is not exactly an all-conv...
+        x = self.fc2(x)                                      # This is not exactly an all-conv...
         return x
 
     @staticmethod
@@ -77,8 +77,8 @@ class StochasticKeyNet(AllConvNet):
         self.conv5 = keynet.layers.KeyedConv2d(192, 192, kernel_size=3, stride=1)  # assumed padding=1
         self.conv6 = keynet.layers.KeyedConv2d(192, 192, kernel_size=3, stride=2)  # assumed padding=1
         self.conv7 = keynet.layers.KeyedConv2d(192, 192, kernel_size=3, stride=1)  # assumed padding=1
-        self.conv8 = keynet.layers.KeyedConv2d(192, 192, kernel_size=1, stride=1)  # assumed padding=1
-        self.conv9 = keynet.layers.KeyedConv2d(192, 10, kernel_size=3, stride=1)  # assumed padding=1
+        self.conv8 = keynet.layers.KeyedConv2d(192, 192, kernel_size=1, stride=1)  # assumed padding=0
+        self.conv9 = keynet.layers.KeyedConv2d(192, 10, kernel_size=1, stride=1)  # assumed padding=0
         self.fc1 = keynet.layers.KeyedLinear(10*8*8, 100)  
         self.fc2 = keynet.layers.KeyedLinear(100, 10)  
 
@@ -155,12 +155,10 @@ class StochasticKeyNet(AllConvNet):
         self.keys['A0inv'] = A0inv
         self.conv1.key(np.array(d_state['conv1.weight']), np.array(d_state['conv1.bias']), self.keys['A1'], self.keys['A0inv'], self.shape['x0'])
         self.conv2.key(np.array(d_state['conv2.weight']), np.array(d_state['conv2.bias']), self.keys['A2'], self.keys['A1inv'], self.shape['x1'])
-
         (conv3bn_weight, conv3bn_bias) = keynet.layers.fuse_conv2d_and_bn(d_state['conv3.weight'], d_state['conv3.bias'], 
                                                                           d_state['conv3_bn.running_mean'], d_state['conv3_bn.running_var'], 1E-5,
                                                                           d_state['conv3_bn.weight'], d_state['conv3_bn.bias'])
         self.conv3.key(np.array(conv3bn_weight), np.array(conv3bn_bias), self.keys['A3'], self.keys['A2inv'], self.shape['x2'])
-
         self.conv4.key(np.array(d_state['conv4.weight']), np.array(d_state['conv4.bias']), self.keys['A4'], self.keys['A3inv'], self.shape['x3'])
         self.conv5.key(np.array(d_state['conv5.weight']), np.array(d_state['conv5.bias']), self.keys['A5'], self.keys['A4inv'], self.shape['x4'])
 
@@ -192,7 +190,8 @@ class StochasticKeyNet(AllConvNet):
         conv7_out = F.relu(self.conv7(conv6_out))         # (192,8,8) -> (192,8,8)
         conv8_out = F.relu(self.conv8(conv7_out))         # (192,8,8) -> (192,8,8)
         conv9_out = F.relu(self.conv9(conv8_out))         # (192,8,8) -> (10,8,8)
-        x = conv9_out.view(-1, 10*8*8)                    # (10,8,8) -> (10*8*8,1)
+        print(conv9_out.shape)
+        x = conv9_out.view(10*8*8+1, -1)                  # (10,8,8) -> (10*8*8,1), C*U*VxN transposed
         x = F.relu(self.fc1(x))                           # This is not exactly an all-conv...
         x = self.fc2(x)                                   # This is not exactly an all-conv...
         return x
@@ -202,7 +201,7 @@ class StochasticKeyNet(AllConvNet):
 
     def decrypt(self, x):
         if self.keys['A11inv'] is not None and self.keys['A11'] is not None:
-            return torch_affine_deaugmentation_tensor(torch.tensor(self.keys['A11inv'].dot(x)))
+            return torch_affine_deaugmentation_tensor(torch.tensor(self.keys['A11inv'].dot(x)))  
         else:
             return torch_affine_deaugmentation_tensor(x)
 

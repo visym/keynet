@@ -9,11 +9,17 @@ import tempfile
 import os
 
 
+def random_dense_positive_definite_matrix(n):
+    A = np.random.rand(n,n)
+    U, s, V = np.linalg.svd(np.dot(A.T, A))
+    X = np.dot(np.dot(U, 1.0 + np.diag(np.random.rand(n))), V)
+    return X
+
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 def count_keynet_parameters(model):
-    return np.sum([layer.What.nnz() for layer in model.children() if 'What' in layer])
+    return np.sum([layer.What.nnz() for layer in model.modules() if hasattr(layer, 'What') and layer.What is not None])
 
 def random_dense_permutation_matrix(n):
     A = np.eye(n)

@@ -11,7 +11,7 @@ import vipy.visualize  # bash setup
 from keynet.util import sparse_permutation_matrix, sparse_identity_matrix, torch_affine_augmentation_tensor, torch_affine_deaugmentation_tensor
 from keynet.util import sparse_toeplitz_conv2d, torch_conv2d_in_scipy
 from keynet.util import sparse_toeplitz_avgpool2d, torch_avgpool2d_in_scipy
-from keynet.util import sparse_diagonal_matrix, sparse_inverse_diagonal_matrix
+from keynet.util import sparse_diagonal_matrix, sparse_inverse_diagonal_matrix, random_dense_positive_definite_matrix
 import keynet.util
 import keynet.blockpermute
 import keynet.mnist
@@ -244,17 +244,37 @@ def test_keynet_cifar():
 
     # AllConvNet
     net = AllConvNet()
-    net.load_state_dict(torch.load('./models/cifar10_allconv.pth'))
     net.eval()
+    net.load_state_dict(torch.load('./models/cifar10_allconv.pth'))
+
     x = torch.tensor(np.random.rand(2,3,32,32).astype(np.float32))
     y = net(x)
 
     # StochasticKeyNet
     A0 = sparse_permutation_matrix(3*32*32 + 1)
     A0inv = A0.transpose()
-    net = StochasticKeyNet()
-    net.load_state_dict_keyed(torch.load('./models/cifar10_allconv.pth'), A0inv=A0inv)
-    net.eval()    
-    yh = net.decrypt(net(net.encrypt(A0, x)))
-    assert(np.allclose(np.array(y), np.array(yh)))
+    knet = StochasticKeyNet()
+    knet.eval()    
+    knet.load_state_dict_keyed(torch.load('./models/cifar10_allconv.pth'), A0inv=A0inv)
+    yh = knet.decrypt(knet(knet.encrypt(A0, x)))
+    print(y)
+    print(yh)
+    assert (np.allclose(np.array(y).flatten(), np.array(yh).flatten(), atol=1E-5))
     print('CIFAR-10 StochasticKeyNet: passed')
+
+    print('AllConvNet parameters: %d' % keynet.util.count_parameters(net))
+    print('StochasticKeyNet parameters: %d' % keynet.util.count_keynet_parameters(knet))
+    return(y,yh)
+
+
+def test_roundoff(m=512, n=1000):
+    x = np.random.randn(m,1).astype(np.float32)
+    xh = x
+    for j in range(0,n):
+        A = random_dense_positive_definite_matrix(m).astype(np.float32)
+        xh = np.dot(A,xh)
+        Ainv = np.linalg.inv(A)
+        xh = np.dot(Ainv,xh)
+        if j % 10 == 0:
+            print('[test_roundoff]: m=%d, n=%d, j=%d, |x-xh|/|x|=%1.13f, |x-xh]=%1.13f' % (m,n,j, np.max(np.abs(x-xh)/np.abs(x)), np.max(np.abs(x-xh))))
+
