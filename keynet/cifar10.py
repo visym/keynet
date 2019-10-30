@@ -7,15 +7,16 @@ from torch import nn, optim
 import torch.nn.functional as F
 import keynet.mnist 
 import keynet.layers
-from keynet.util import sparse_permutation_matrix, sparse_identity_matrix, sparse_uniform_random_diagonal_matrix, sparse_inverse_diagonal_matrix, torch_affine_augmentation_tensor, torch_affine_deaugmentation_tensor
+from keynet.util import sparse_permutation_matrix, sparse_identity_matrix, sparse_uniform_random_diagonal_matrix, sparse_inverse_diagonal_matrix
+from keynet.torch import affine_augmentation_tensor, affine_deaugmentation_tensor
 
 
 class AllConvNet(nn.Module):
     """https://github.com/StefOe/all-conv-pytorch/blob/master/cifar10.ipynb"""
-    def __init__(self, n_classes=10, **kwargs):
+    def __init__(self, n_input_channels=3, n_classes=10, **kwargs):
         super(AllConvNet, self).__init__()
         self.dropout0 = nn.Dropout(p=0.2) 
-        self.conv1 = nn.Conv2d(3, 96, 3, padding=1) 
+        self.conv1 = nn.Conv2d(n_input_channels, 96, 3, padding=1) 
         self.conv2 = nn.Conv2d(96, 96, 3, padding=1)
         self.conv3 = nn.Conv2d(96, 96, 3, padding=1, stride=2)
         self.conv3_bn = nn.BatchNorm2d(96)   # Necessary to get this to train!
@@ -64,7 +65,7 @@ class AllConvNet(nn.Module):
                                    transforms.Normalize([0.49139968,  0.48215841,  0.44653091], [0.24703223,  0.24348513,  0.26158784])])
 
     def loss(self, x):
-        return x
+        return F.log_softmax(x, dim=1)
 
 
 class StochasticKeyNet(AllConvNet):
@@ -190,20 +191,19 @@ class StochasticKeyNet(AllConvNet):
         conv7_out = F.relu(self.conv7(conv6_out))         # (192,8,8) -> (192,8,8)
         conv8_out = F.relu(self.conv8(conv7_out))         # (192,8,8) -> (192,8,8)
         conv9_out = F.relu(self.conv9(conv8_out))         # (192,8,8) -> (10,8,8)
-        print(conv9_out.shape)
         x = conv9_out.view(10*8*8+1, -1)                  # (10,8,8) -> (10*8*8,1), C*U*VxN transposed
         x = F.relu(self.fc1(x))                           # This is not exactly an all-conv...
         x = self.fc2(x)                                   # This is not exactly an all-conv...
         return x
 
     def encrypt(self, A0, x):        
-        return torch.tensor(A0.dot(torch_affine_augmentation_tensor(x))) if A0 is not None else x
+        return torch.tensor(A0.dot(affine_augmentation_tensor(x))) if A0 is not None else x
 
     def decrypt(self, x):
         if self.keys['A11inv'] is not None and self.keys['A11'] is not None:
-            return torch_affine_deaugmentation_tensor(torch.tensor(self.keys['A11inv'].dot(x)))  
+            return affine_deaugmentation_tensor(torch.tensor(self.keys['A11inv'].dot(x)))  
         else:
-            return torch_affine_deaugmentation_tensor(x)
+            return affine_deaugmentation_tensor(x)
 
     def loss(self, x):
         return self.decrypt(x)
@@ -271,4 +271,26 @@ def allconv():
     testmodel = AllConvNet()
     testmodel.load_state_dict(torch.load('./models/cifar10_allconv.pth'))
     validate(testmodel)
+
+def lenet():
+    net = keynet.mnist.LeNet()
+    train(net, modelfile='./models/cifar10_lenet.pth', lr=0.01, epochs=350, transform=net.transform_cifar10_train())
+    testnet = keynet.mnist.LeNet()
+    testnet.load_state_dict(torch.load('./models/cifar10_lenet.pth'))
+    validate(testnet, transform=testnet.transform_cifar10_test())
+
+def lenet_avgpool():
+    net = keynet.mnist.LeNet_AvgPool()
+    train(net, modelfile='./models/cifar10_lenet_avgpool.pth', lr=0.01, epochs=350, transform=net.transform_cifar10_train())
+    testnet = keynet.mnist.LeNet_AvgPool()
+    testnet.load_state_dict(torch.load('./models/cifar10_lenet_avgpool.pth'))
+    validate(testnet, transform=testnet.transform_cifar10_test())
+
+
+def keynet_alpha1():
+    A0 = sparse_permutation_matrix(32*32*3 + 1)
+    A0inv = A0.transpose()
+    net = keynet.cifar10.StochasticKeyNet()
+    net.load_state_dict_keyed(torch.load('./models/cifar10_allconv.pth'), A0inv=A0inv)
+    validate(net, secretkey=A0)
 

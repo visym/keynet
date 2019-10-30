@@ -6,8 +6,11 @@ from torchvision import datasets, transforms
 from torch import nn, optim
 import torch.nn.functional as F
 import keynet.layers
-from keynet.util import sparse_permutation_matrix, sparse_identity_matrix, sparse_uniform_random_diagonal_matrix, sparse_inverse_diagonal_matrix, torch_affine_augmentation_tensor, torch_affine_deaugmentation_tensor
+from keynet.util import sparse_permutation_matrix, sparse_identity_matrix, sparse_uniform_random_diagonal_matrix, sparse_inverse_diagonal_matrix
+from keynet.torch import affine_augmentation_tensor, affine_deaugmentation_tensor
 import vipy.util
+import keynet.cifar10
+
 
 class LeNet(nn.Module):
     """Slightly modified LeNet to include padding, odd filter sizes and even image sizes"""
@@ -38,12 +41,20 @@ class LeNet(nn.Module):
     def transform(self):
         return transforms.Compose([transforms.ToTensor(),        
                                    transforms.Normalize((0.1307,), (0.3081,))])
-    def transform_train(self):
-        # TESTING
+
+    def transform_cifar10_train(self):
         return transforms.Compose([transforms.Grayscale(),
                                    transforms.Resize( (28,28) ),
-                                   transforms.ToTensor(),        
-                                   transforms.Normalize((0.1307,), (0.3081,))])
+                                   transforms.RandomCrop(28, padding=4),
+                                   transforms.RandomHorizontalFlip(),
+                                   transforms.ToTensor(),
+                                   transforms.Normalize((0.49139968,), (0.24703223,))])
+
+    def transform_cifar10_test(self):
+        return transforms.Compose([transforms.Grayscale(),
+                                   transforms.Resize( (28,28) ),
+                                   transforms.ToTensor(),
+                                   transforms.Normalize((0.49139968,), (0.24703223,))])
 
 class LeNet_AvgPool(LeNet):
     """https://github.com/pytorch/examples/blob/master/mnist/main.py"""
@@ -114,13 +125,13 @@ class KeyNet(nn.Module):
         return x7
 
     def encrypt(self, A0, x):        
-        return torch.tensor(A0.dot(torch_affine_augmentation_tensor(x))) if A0 is not None else x
+        return torch.tensor(A0.dot(affine_augmentation_tensor(x))) if A0 is not None else x
 
     def decrypt(self, x):
         if self.keys['A7inv'] is not None and self.keys['A7'] is not None:
-            return torch_affine_deaugmentation_tensor(torch.tensor(self.keys['A7inv'].dot(x)))
+            return affine_deaugmentation_tensor(torch.tensor(self.keys['A7inv'].dot(x)))
         else:
-            return torch_affine_deaugmentation_tensor(x)
+            return affine_deaugmentation_tensor(x)
 
     def loss(self, x):
         return F.log_softmax(self.decrypt(x), dim=1)
@@ -221,8 +232,8 @@ class StochasticKeyNet(KeyNet):
         super(StochasticKeyNet, self).__init__(keys)
 
 
-def train(net, modelfile, mnistdir='/proj/enigma', lr=0.003, epochs=20):
-    trainset = datasets.MNIST(mnistdir, download=True, train=True, transform=net.transform())
+def train(net, modelfile, mnistdir='/proj/enigma', lr=0.003, epochs=20, transform=LeNet().transform()):
+    trainset = datasets.MNIST(mnistdir, download=True, train=True, transform=transform)
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=64, shuffle=True)
 
     criterion = F.nll_loss
@@ -247,8 +258,8 @@ def train(net, modelfile, mnistdir='/proj/enigma', lr=0.003, epochs=20):
     return net
 
 
-def validate(net, mnistdir='/proj/enigma', secretkey=None):
-    valset = datasets.MNIST(mnistdir, download=True, train=False, transform=net.transform())
+def validate(net, mnistdir='/proj/enigma', secretkey=None, transform=LeNet().transform()):
+    valset = datasets.MNIST(mnistdir, download=True, train=False, transform=transform)
     valloader = torch.utils.data.DataLoader(valset, batch_size=64, shuffle=True)
     net.eval()
 
@@ -266,19 +277,26 @@ def validate(net, mnistdir='/proj/enigma', secretkey=None):
     print('Validation: %s sec' % sw.elapsed)
 
 def lenet():
-    net = train(LeNet(), modelfile='/proj/enigma/jebyrne/mnist_lenet.pth', lr=0.003, epochs=20)
+    net = train(LeNet(), modelfile='./models/mnist_lenet.pth', lr=0.003, epochs=20)
     validate(net)
 
 
 def lenet_avgpool():
-    net = train(LeNet_AvgPool(), modelfile='/proj/enigma/jebyrne/mnist_lenet_avgpool.pth', lr=0.003, epochs=40)
-    #net = LeNet_AvgPool(); net.load_state_dict(torch.load('/proj/enigma/jebyrne/mnist_lenet_avgpool.pth'))
+    net = train(LeNet_AvgPool(), modelfile='./models/mnist_lenet_avgpool.pth', lr=0.003, epochs=40)
     validate(net)
 
+def allconvnet():
+    transform = transforms.Compose([transforms.Grayscale(),
+                                    transforms.Resize( (32,32) ),
+                                    transforms.ToTensor(),        
+                                    transforms.Normalize((0.1307,), (0.3081,))])
+    net = train(keynet.cifar10.AllConvNet(n_input_channels=1), modelfile='./models/mnist_allconvnet.pth', lr=0.003, epochs=40, transform=transform)
+    validate(net, transform=transform)
+    
 
 def keynet_alpha1():
     net = PermutationKeyNet()
     A0 = sparse_permutation_matrix(28*28*1 + 1)
     A0inv = A0.transpose()
-    net.load_state_dict_keyed(torch.load('/proj/enigma/jebyrne/mnist_lenet_avgpool.pth'), A0inv)
+    net.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv)
     validate(net, secretkey=A0)

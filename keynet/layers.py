@@ -1,6 +1,6 @@
 from torch import nn
 from numpy.linalg import multi_dot 
-from keynet.util import torch_affine_augmentation_matrix, sparse_toeplitz_conv2d, sparse_toeplitz_avgpool2d
+from keynet.torch import affine_augmentation_matrix, sparse_toeplitz_conv2d, sparse_toeplitz_avgpool2d
 import torch
 import numpy as np
 import scipy.sparse
@@ -36,7 +36,7 @@ class KeyedLinear(nn.Module):
 
     def key(self, W, b, A, Ainv):
         assert(W.shape[0] == self.out_features and W.shape[1] == self.in_features)
-        self.What = torch_affine_augmentation_matrix(torch.tensor(W), torch.tensor(b))
+        self.What = affine_augmentation_matrix(torch.tensor(W), torch.tensor(b))
         self.What = np.dot(self.What, Ainv.todense())
         if A is not None:
             self.What = A.dot(self.What)

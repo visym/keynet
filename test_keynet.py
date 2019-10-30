@@ -8,9 +8,10 @@ import torch.nn.functional as F
 import torch 
 import vipy.image  # bash setup
 import vipy.visualize  # bash setup
-from keynet.util import sparse_permutation_matrix, sparse_identity_matrix, torch_affine_augmentation_tensor, torch_affine_deaugmentation_tensor
-from keynet.util import sparse_toeplitz_conv2d, torch_conv2d_in_scipy
-from keynet.util import sparse_toeplitz_avgpool2d, torch_avgpool2d_in_scipy
+from keynet.util import sparse_permutation_matrix, sparse_identity_matrix
+from keynet.torch import affine_augmentation_tensor, affine_deaugmentation_tensor
+from keynet.torch import sparse_toeplitz_conv2d, conv2d_in_scipy
+from keynet.torch import sparse_toeplitz_avgpool2d, avgpool2d_in_scipy
 from keynet.util import sparse_diagonal_matrix, sparse_inverse_diagonal_matrix, random_dense_positive_definite_matrix
 import keynet.util
 import keynet.blockpermute
@@ -114,8 +115,8 @@ def test_affine_augmentation():
     (N,C,U,V) = (2,2,3,3)
     x = torch.tensor(np.random.rand( N,C,U,V ).astype(np.float32))    
 
-    x_affine = torch_affine_augmentation_tensor(x)
-    x_deaffine = torch_affine_deaugmentation_tensor(x_affine).reshape( N,C,U,V )
+    x_affine = affine_augmentation_tensor(x)
+    x_deaffine = affine_deaugmentation_tensor(x_affine).reshape( N,C,U,V )
     assert(np.allclose(x, x_deaffine))
     print('Affine augmentation (round-trip): passed')    
     
@@ -140,7 +141,7 @@ def test_sparse_toeplitz_conv2d():
     yh = yh.reshape(N,M,U//stride,V//stride)
 
     # Spatial convolution:  torch replicated in scipy
-    y_scipy = torch_conv2d_in_scipy(img, f, b, stride=stride)
+    y_scipy = conv2d_in_scipy(img, f, b, stride=stride)
     assert(np.allclose(y_scipy, yh))
     print('Correlation (scipy vs. toeplitz): passed')    
 
@@ -167,7 +168,7 @@ def test_sparse_toeplitz_avgpool2d():
     yh = yh.reshape(N,C,U//stride,V//stride)
 
     # Average pooling
-    y_scipy = torch_avgpool2d_in_scipy(img, kernelsize, stride)
+    y_scipy = avgpool2d_in_scipy(img, kernelsize, stride)
     assert(np.allclose(y_scipy, yh))
     print('Average pool 2D (scipy vs. toeplitz): passed')    
 
@@ -184,42 +185,46 @@ def test_keynet_mnist():
 
     # LeNet
     net = keynet.mnist.LeNet_AvgPool()
-    net.load_state_dict(torch.load('./models/mnist_avgpool.pth'))
+    net.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'))
     net.eval()
     x = torch.tensor(np.random.rand(2,1,28,28).astype(np.float32))
     y = net(x)
+    print('LeNet parameters: %d' % keynet.util.count_parameters(net))
 
     # Identity KeyNet
     A0 = sparse_identity_matrix(28*28*1 + 1)
     A0inv = A0
-    keynet = keynet.mnist.KeyNet()
-    keynet.load_state_dict_keyed(torch.load('./models/mnist_avgpool.pth'), A0inv=A0inv)
-    keynet.eval()    
-    yh_identity = keynet.decrypt(keynet(keynet.encrypt(A0, x)))
+    knet = keynet.mnist.KeyNet()
+    knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
+    knet.eval()    
+    yh_identity = knet.decrypt(knet(knet.encrypt(A0, x)))
     assert(np.allclose(np.array(y), np.array(yh_identity)))
     print('MNIST IdentityKeyNet: passed')
+    print('IdentityKeyNet parameters: %d' % keynet.util.count_keynet_parameters(knet))
 
     # Permutation KeyNet
     A0 = sparse_permutation_matrix(28*28*1 + 1)
     A0inv = A0.transpose()
-    keynet = keynet.mnist.PermutationKeyNet()
-    keynet.load_state_dict_keyed(torch.load('./models/mnist_avgpool.pth'), A0inv=A0inv)
-    keynet.eval()    
-    yh_permutation = keynet.decrypt(keynet(keynet.encrypt(A0, x)))
-    fc3_permutation = keynet.fc3.What
+    knet = keynet.mnist.PermutationKeyNet()
+    knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
+    knet.eval()    
+    yh_permutation = knet.decrypt(knet(knet.encrypt(A0, x)))
+    fc3_permutation = knet.fc3.What
     assert(np.allclose(np.array(y), np.array(yh_permutation)))
     print('MNIST PermutationKeyNet: passed')
+    print('PermutationKeyNet parameters: %d' % keynet.util.count_keynet_parameters(knet))
 
     # Diagonal KeyNet
     A0 = sparse_diagonal_matrix(28*28*1 + 1)
     A0inv = sparse_inverse_diagonal_matrix(A0)
-    keynet = keynet.mnist.DiagonalKeyNet()
-    keynet.load_state_dict_keyed(torch.load('./models/mnist_avgpool.pth'), A0inv=A0inv)
-    keynet.eval()    
-    yh_diagonal = keynet.decrypt(keynet(keynet.encrypt(A0, x)))
-    fc3_diagonal = keynet.fc3.What
+    knet = keynet.mnist.DiagonalKeyNet()
+    knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
+    knet.eval()    
+    yh_diagonal = knet.decrypt(knet(knet.encrypt(A0, x)))
+    fc3_diagonal = knet.fc3.What
     assert(np.allclose(np.array(y), np.array(yh_diagonal)))
     print('MNIST DiagonalKeyNet: passed')
+    print('DiagonalKeyNet parameters: %d' % keynet.util.count_keynet_parameters(knet))
 
     # Diagonal vs. Permutation KeyNet (fc3 What comparison)
     assert(not np.allclose(np.array(fc3_permutation), np.array(fc3_diagonal)))
@@ -228,13 +233,13 @@ def test_keynet_mnist():
     # Stochastic KeyNet
     A0 = sparse_diagonal_matrix(28*28*1 + 1)
     A0inv = sparse_inverse_diagonal_matrix(A0)
-    keynet = keynet.mnist.StochasticKeyNet()
-    keynet.load_state_dict_keyed(torch.load('./models/mnist_avgpool.pth'), A0inv=A0inv)
-    keynet.eval()    
-    yh_stochastic = keynet.decrypt(keynet(keynet.encrypt(A0, x)))
+    knet = keynet.mnist.StochasticKeyNet()
+    knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
+    knet.eval()    
+    yh_stochastic = knet.decrypt(knet(knet.encrypt(A0, x)))
     assert(np.allclose(np.array(y), np.array(yh_stochastic)))
     print('MNIST StochasticKeyNet: passed')
-
+    print('StochasticKeyNet parameters: %d' % keynet.util.count_keynet_parameters(knet))
     
 def test_keynet_cifar():
     from keynet.cifar10 import AllConvNet, StochasticKeyNet
