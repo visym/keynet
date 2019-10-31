@@ -124,6 +124,8 @@ class KeyNet(nn.Module):
                      'A7inv':sparse_identity_matrix(np.prod(self.shape['x7'])+1)} if keys is None else keys
         
     def load_state_dict_keyed(self, d_state, A0inv):        
+        d_state = {k.replace('module.',''):v.cpu() for (k,v) in d_state.items()}  # nn.DataParallel training cruft (if needed)
+
         self.conv1.key(np.array(d_state['conv1.weight']), np.array(d_state['conv1.bias']), self.keys['A1a'], A0inv, self.shape['x0'])
         self.relu1.key(self.keys['A1b'], self.keys['A1ainv'])
         self.pool1.key(self.keys['A2'], self.keys['A1binv'], self.shape['x1b'])
@@ -375,3 +377,17 @@ def keynet_alpha1():
     A0inv = A0.transpose()
     net.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv)
     validate(net, secretkey=A0)
+
+
+def keynet_alpha1_allconv():
+    net = keynet.cifar10.StochasticKeyNet(n_input_channels=1)
+    A0 = sparse_permutation_matrix(32*32*1 + 1)
+    A0inv = A0.transpose()
+
+    transform = transforms.Compose([transforms.Grayscale(),
+                                    transforms.Resize( (32,32) ),
+                                    transforms.ToTensor(),        
+                                    transforms.Normalize((0.1307,), (0.3081,))])
+
+    net.load_state_dict_keyed(torch.load('./models/mnist_allconvnet.pth'), A0inv)
+    validate(net, secretkey=A0, transform=transform)
