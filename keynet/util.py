@@ -20,11 +20,11 @@ def random_dense_permutation_matrix(n):
     A = np.random.permutation(A)
     return A
 
-def random_dense_doubly_stochastic_matrix(n,k):
+def random_dense_doubly_stochastic_matrix(n,k,n_iter=100):
     A = np.random.rand()*random_dense_permutation_matrix(n)
     for k in range(0,k):
         A = A + np.random.rand()*random_dense_permutation_matrix(n)
-    for k in range(0,100):
+    for k in range(0,n_iter):
         A = A / np.sum(A,axis=0)
         A = A / np.sum(A,axis=1)        
     return A
@@ -76,56 +76,41 @@ def sparse_diagonal_matrix(n):
 def sparse_inverse_diagonal_matrix(D):
     return scipy.sparse.diags(1.0 / D.diagonal())
 
-def sparse_random_doubly_stochastic_matrix(n, k):
+def sparse_random_doubly_stochastic_matrix(n, k, n_iter=100):
     A = np.random.rand()*sparse_permutation_matrix(n)
     for k in range(0,k):
         A = A + np.random.rand()*sparse_permutation_matrix(n)
-    for k in range(0,100):
+    for k in range(0,n_iter):
         A = normalize(A, norm='l1', axis=0)
         A = normalize(A, norm='l1', axis=1)
     return A
 
 
-def sparse_random_diagonally_dominant_doubly_stochastic_matrix(n, k):
+def sparse_random_diagonally_dominant_doubly_stochastic_matrix(n, k=None, n_iter=100):
     """Return sparse matrix (nxn) such that at nost k elements per row are non-zero and matrix is positive definite"""
+    k = n if k is None else k
     d = np.random.rand(k,n)
-    d[0,:] = np.maximum(d[0,:], np.sum(d[1:,:], axis=0) + 0.1)  # first column is greater than sum of other columns
+    d[0,:] = np.maximum(d[0,:], np.sum(d[1:,:], axis=0) + 0.1)  # first column is greater than sum of other columns 
     d = d / np.sum(d,axis=0).reshape(1,n)  # sum over cols
     k_range = list(range(-((k-1)//2), 1+((k-1)//2)) if k%2==1 else list(range(-(k//2), k//2)))
     k_range.remove(0)
     k_range = [0] + k_range  # first row is main diagonal
     A = scipy.sparse.spdiags(d, k_range, n, n, format='csr')
-    for k in range(0,100):
+    for k in range(0,n_iter):
         A = normalize(A, norm='l1', axis=0)
         A = normalize(A, norm='l1', axis=1)
     return A
     
 
-def sparse_generalized_stochastic_matrix(n,m,k):
-    """Returns (A,Ainv) for (nxn) sparse matrix of the form P*S*D, where D is uniform random diagonal, S is block diagonal of size m with k nonzero entries per row, and P is permutation"""
-    """Setting m=k=1 results in scaled permutation matrix"""
-    assert(n%m == 0 and k<=m and n>=m) 
-    D = sparse_uniform_random_diagonal_matrix(n)
+def sparse_stochastic_matrix(n,m):
+    """Returns (A,Ainv) for (nxn) sparse matrix of the form P*S*I, where S is block diagonal of size m, and P is permutation"""
+    """Setting m=1 results in a permutation matrix"""
+    #assert(k<=m and n>=m) 
+    m = np.minimum(n,m)
+
     P = sparse_permutation_matrix(n)
-    B = [sparse_random_diagonally_dominant_doubly_stochastic_matrix(m,k) for j in range(0,n//m)]
-    S = scipy.sparse.block_diag(B, format='csr')
-    A = P*S*D
-
-    Binv = [np.linalg.inv(b.todense()) for b in B]
-    Sinv = scipy.sparse.block_diag(Binv, format='csr')
-    Pinv = P.transpose()
-    Dinv = sparse_inverse_diagonal_matrix(D)
-    Ainv = Dinv * Sinv * Pinv
-
-    return(A,Ainv)
-
-
-def sparse_stochastic_matrix(n,m,k):
-    """Returns (A,Ainv) for (nxn) sparse matrix of the form P*S*I, where S is block diagonal of size m with k nonzero entries per row, and P is permutation"""
-    """Setting m=k=1 results in a permutation matrix"""
-    assert(n%m == 0 and k<=m and n>=m) 
-    P = sparse_permutation_matrix(n)
-    B = [sparse_random_diagonally_dominant_doubly_stochastic_matrix(m,k) for j in range(0,n//m)]
+    B = [sparse_random_diagonally_dominant_doubly_stochastic_matrix(m) for j in np.arange(0,n-m,m)]
+    B = B + [sparse_random_diagonally_dominant_doubly_stochastic_matrix(n-len(B)*m)]
     S = scipy.sparse.block_diag(B, format='csr')
     A = P*S
 
@@ -135,6 +120,47 @@ def sparse_stochastic_matrix(n,m,k):
     Ainv = Sinv * Pinv
 
     return(A,Ainv)
+
+def sparse_generalized_stochastic_block_matrix(n,m):
+    """Returns (A,Ainv) for (nxn) sparse matrix of the form P*S*D, where D is uniform random diagonal, S is stochastic block matrix of size m, and P is permutation"""
+    """Setting m=1 results in scaled permutation matrix"""
+    #assert(k<=m and n>=m) 
+    m = np.minimum(n,m)
+
+    (M,Minv) = sparse_stochastic_matrix(n,m)
+    D = sparse_uniform_random_diagonal_matrix(n)
+    A = M*D
+    Dinv = sparse_inverse_diagonal_matrix(D)
+    Ainv = Dinv * Minv
+
+    return(A,Ainv)
+
+
+def sparse_positive_definite_block_diagonal(n,m):
+    m = np.minimum(n,m)
+    B = [random_dense_positive_definite_matrix(m) for j in np.arange(0,n-m,m)]
+    B = B + [random_dense_positive_definite_matrix(n-len(B)*m)]
+    A = scipy.sparse.block_diag(B, format='csr')
+    Binv = [np.linalg.inv(b) for b in B]
+    Ainv = scipy.sparse.block_diag(Binv, format='csr')
+    return(A,Ainv)
+
+
+def sparse_generalized_permutation_block_matrix(n,m):
+    """Returns (A,Ainv) for (nxn) sparse matrix of the form B*P*D, where D is uniform random diagonal, B is block diagonal of size m, and P is permutation"""
+    """Setting m=k=1 results in scaled permutation matrix"""
+    m = np.minimum(n,m)
+
+    (B,Binv) = sparse_positive_definite_block_diagonal(n,m)
+    D = sparse_uniform_random_diagonal_matrix(n)
+    P = sparse_permutation_matrix(n)
+    A = B*P*D
+    Dinv = sparse_inverse_diagonal_matrix(D)
+    Ainv = Dinv * Pinv * Binv
+
+    return(A,Ainv)
+
+
 
 
     

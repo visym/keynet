@@ -7,6 +7,7 @@ from torch import nn, optim
 import torch.nn.functional as F
 import keynet.layers
 from keynet.util import sparse_permutation_matrix, sparse_identity_matrix, sparse_uniform_random_diagonal_matrix, sparse_inverse_diagonal_matrix
+from keynet.util import sparse_generalized_stochastic_block_matrix, sparse_generalized_permutation_block_matrix, sparse_stochastic_matrix
 from keynet.torch import affine_augmentation_tensor, affine_deaugmentation_tensor
 import vipy.util
 import keynet.cifar10
@@ -79,49 +80,74 @@ class KeyNet(nn.Module):
         self.fc1 = keynet.layers.KeyedLinear(7*7*16, 120)
         self.fc2 = keynet.layers.KeyedLinear(120, 84)
         self.fc3 = keynet.layers.KeyedLinear(84, 10)
+        self.relu1 = keynet.layers.KeyedRelu()
+        self.relu2 = keynet.layers.KeyedRelu()
+        self.relu3 = keynet.layers.KeyedRelu()
+        self.relu4 = keynet.layers.KeyedRelu()
 
+        # Layer output shapes:  x1 = conv1(x0)
         self.shape = {'x0':(1,28,28),   # image input
-                      'x1':(6,28,28),   # pool1 input
-                      'x2':(6,14,14),   # conv2 input
-                      'x3':(16,14,14),  # pool2 input
-                      'x4':(16,7,7),    # fc1 input
-                      'x5':(120,1,1),   # fc2 input
-                      'x6':(84,1,1),    # fc3 input
-                      'x7':(10,1,1)}    # output 
+                      'x1a':(6,28,28),   # conv1 output
+                      'x1b':(6,28,28),   # relu output
+                      'x2':(6,14,14),    # pool1 output
+                      'x3a':(16,14,14),  # conv2 output
+                      'x3b':(16,14,14),  # conv2-relu output
+                      'x4':(16,7,7),     # pool2 output
+                      'x5a':(120,1,1),   # fc1 output
+                      'x5b':(120,1,1),   # fc1-relu
+                      'x6a':(84,1,1),    # fc2 output
+                      'x6b':(84,1,1),    # fc2-relu output
+                      'x7':(10,1,1)}     # fc3 output
 
         self.keys = {'A0inv':None,
-                     'A1':sparse_identity_matrix(np.prod(self.shape['x1'])+1),
-                     'A1inv':sparse_identity_matrix(np.prod(self.shape['x1'])+1),
+                     'A1a':sparse_identity_matrix(np.prod(self.shape['x1a'])+1),
+                     'A1ainv':sparse_identity_matrix(np.prod(self.shape['x1a'])+1),
+                     'A1b':sparse_identity_matrix(np.prod(self.shape['x1b'])+1),
+                     'A1binv':sparse_identity_matrix(np.prod(self.shape['x1b'])+1),
                      'A2':sparse_identity_matrix(np.prod(self.shape['x2'])+1),
                      'A2inv':sparse_identity_matrix(np.prod(self.shape['x2'])+1),                     
-                     'A3':sparse_identity_matrix(np.prod(self.shape['x3'])+1),
-                     'A3inv':sparse_identity_matrix(np.prod(self.shape['x3'])+1),
+                     'A3a':sparse_identity_matrix(np.prod(self.shape['x3a'])+1),
+                     'A3ainv':sparse_identity_matrix(np.prod(self.shape['x3a'])+1),
+                     'A3b':sparse_identity_matrix(np.prod(self.shape['x3b'])+1),
+                     'A3binv':sparse_identity_matrix(np.prod(self.shape['x3b'])+1),
                      'A4':sparse_identity_matrix(np.prod(self.shape['x4'])+1),
                      'A4inv':sparse_identity_matrix(np.prod(self.shape['x4'])+1),
-                     'A5':sparse_identity_matrix(np.prod(self.shape['x5'])+1),
-                     'A5inv':sparse_identity_matrix(np.prod(self.shape['x5'])+1),
-                     'A6':sparse_identity_matrix(np.prod(self.shape['x6'])+1),
-                     'A6inv':sparse_identity_matrix(np.prod(self.shape['x6'])+1),
+                     'A5a':sparse_identity_matrix(np.prod(self.shape['x5a'])+1),
+                     'A5ainv':sparse_identity_matrix(np.prod(self.shape['x5a'])+1),
+                     'A5b':sparse_identity_matrix(np.prod(self.shape['x5b'])+1),
+                     'A5binv':sparse_identity_matrix(np.prod(self.shape['x5b'])+1),
+                     'A6a':sparse_identity_matrix(np.prod(self.shape['x6a'])+1),
+                     'A6ainv':sparse_identity_matrix(np.prod(self.shape['x6a'])+1),
+                     'A6b':sparse_identity_matrix(np.prod(self.shape['x6b'])+1),
+                     'A6binv':sparse_identity_matrix(np.prod(self.shape['x6b'])+1),
                      'A7':sparse_identity_matrix(np.prod(self.shape['x7'])+1),
                      'A7inv':sparse_identity_matrix(np.prod(self.shape['x7'])+1)} if keys is None else keys
         
     def load_state_dict_keyed(self, d_state, A0inv):        
-        self.conv1.key(np.array(d_state['conv1.weight']), np.array(d_state['conv1.bias']), self.keys['A1'], A0inv, self.shape['x0'])
-        self.pool1.key(self.keys['A2'], self.keys['A1inv'], self.shape['x1'])
-        self.conv2.key(np.array(d_state['conv2.weight']), np.array(d_state['conv2.bias']), self.keys['A3'], self.keys['A2inv'], self.shape['x2'])
-        self.pool2.key(self.keys['A4'], self.keys['A3inv'], self.shape['x3'])
-        self.fc1.key(np.array(d_state['fc1.weight']), np.array(d_state['fc1.bias']), self.keys['A5'], self.keys['A4inv'])
-        self.fc2.key(np.array(d_state['fc2.weight']), np.array(d_state['fc2.bias']), self.keys['A6'], self.keys['A5inv'])
-        self.fc3.key(np.array(d_state['fc3.weight']), np.array(d_state['fc3.bias']), self.keys['A7'], self.keys['A6inv'])
+        self.conv1.key(np.array(d_state['conv1.weight']), np.array(d_state['conv1.bias']), self.keys['A1a'], A0inv, self.shape['x0'])
+        self.relu1.key(self.keys['A1b'], self.keys['A1ainv'])
+        self.pool1.key(self.keys['A2'], self.keys['A1binv'], self.shape['x1b'])
+        self.conv2.key(np.array(d_state['conv2.weight']), np.array(d_state['conv2.bias']), self.keys['A3a'], self.keys['A2inv'], self.shape['x2'])
+        self.relu2.key(self.keys['A3b'], self.keys['A3ainv'])
+        self.pool2.key(self.keys['A4'], self.keys['A3binv'], self.shape['x3b'])
+        self.fc1.key(np.array(d_state['fc1.weight']), np.array(d_state['fc1.bias']), self.keys['A5a'], self.keys['A4inv'])
+        self.relu3.key(self.keys['A5b'], self.keys['A5ainv'])
+        self.fc2.key(np.array(d_state['fc2.weight']), np.array(d_state['fc2.bias']), self.keys['A6a'], self.keys['A5binv'])
+        self.relu4.key(self.keys['A6b'], self.keys['A6ainv'])
+        self.fc3.key(np.array(d_state['fc3.weight']), np.array(d_state['fc3.bias']), self.keys['A7'], self.keys['A6binv'])
 
     def forward(self, A0x0_affine):
-        x1 = F.relu(self.conv1(A0x0_affine))
-        x2 = self.pool1(x1)
-        x3 = F.relu(self.conv2(x2))
-        x4 = self.pool2(x3)
-        x5 = F.relu(self.fc1(x4.view(7*7*16+1, -1)))  # reshape transposed
-        x6 = F.relu(self.fc2(x5))
-        x7 = self.fc3(x6)
+        x1a = self.conv1(A0x0_affine)
+        x1b = self.relu1(x1a)
+        x2 = self.pool1(x1b)
+        x3a = self.conv2(x2)
+        x3b = self.relu2(x3a)
+        x4 = self.pool2(x3b)
+        x5a = self.fc1(x4.view(7*7*16+1, -1))  # reshape transposed
+        x5b = self.relu3(x5a)  
+        x6a = self.fc2(x5b)
+        x6b = self.relu4(x6a)
+        x7 = self.fc3(x6b)
         return x7
 
     def encrypt(self, A0, x):        
@@ -146,21 +172,29 @@ class PermutationKeyNet(KeyNet):
     def __init__(self):
         super(PermutationKeyNet, self).__init__()
 
-        keys = {'A1':sparse_permutation_matrix(np.prod(self.shape['x1'])+1),
+        keys = {'A1a':sparse_permutation_matrix(np.prod(self.shape['x1a'])+1),
+                'A1b':sparse_permutation_matrix(np.prod(self.shape['x1b'])+1),
                 'A2':sparse_permutation_matrix(np.prod(self.shape['x2'])+1),
-                'A3':sparse_permutation_matrix(np.prod(self.shape['x3'])+1),
+                'A3a':sparse_permutation_matrix(np.prod(self.shape['x3a'])+1),
+                'A3b':sparse_permutation_matrix(np.prod(self.shape['x3b'])+1),
                 'A4':sparse_permutation_matrix(np.prod(self.shape['x4'])+1),
-                'A5':sparse_permutation_matrix(np.prod(self.shape['x5'])+1),
-                'A6':sparse_permutation_matrix(np.prod(self.shape['x6'])+1),
+                'A5a':sparse_permutation_matrix(np.prod(self.shape['x5a'])+1),
+                'A5b':sparse_permutation_matrix(np.prod(self.shape['x5b'])+1),
+                'A6a':sparse_permutation_matrix(np.prod(self.shape['x6a'])+1),
+                'A6b':sparse_permutation_matrix(np.prod(self.shape['x6b'])+1),
                 'A7':sparse_permutation_matrix(np.prod(self.shape['x7'])+1),}
         
         keys.update({'A0inv':None,
-                     'A1inv':keys['A1'].transpose(),
+                     'A1ainv':keys['A1a'].transpose(),
+                     'A1binv':keys['A1b'].transpose(),
                      'A2inv':keys['A2'].transpose(),
-                     'A3inv':keys['A3'].transpose(),
+                     'A3ainv':keys['A3a'].transpose(),
+                     'A3binv':keys['A3b'].transpose(),
                      'A4inv':keys['A4'].transpose(),
-                     'A5inv':keys['A5'].transpose(),
-                     'A6inv':keys['A6'].transpose(),
+                     'A5ainv':keys['A5a'].transpose(),
+                     'A5binv':keys['A5b'].transpose(),
+                     'A6ainv':keys['A6a'].transpose(),
+                     'A6binv':keys['A6b'].transpose(),
                      'A7inv':keys['A7'].transpose()})
 
         super(PermutationKeyNet, self).__init__(keys)
@@ -170,21 +204,29 @@ class DiagonalKeyNet(KeyNet):
     def __init__(self):
         super(DiagonalKeyNet, self).__init__()
 
-        keys = {'A1':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x1'])+1),
+        keys = {'A1a':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x1a'])+1),
+                'A1b':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x1b'])+1),
                 'A2':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x2'])+1),
-                'A3':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x3'])+1),
+                'A3a':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x3a'])+1),
+                'A3b':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x3b'])+1),
                 'A4':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x4'])+1),
-                'A5':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x5'])+1),
-                'A6':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x6'])+1),
+                'A5a':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x5a'])+1),
+                'A5b':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x5b'])+1),
+                'A6a':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x6a'])+1),
+                'A6b':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x6b'])+1),
                 'A7':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x7'])+1),}
         
         keys.update({'A0inv':None,
-                     'A1inv':sparse_inverse_diagonal_matrix(keys['A1']),
+                     'A1ainv':sparse_inverse_diagonal_matrix(keys['A1a']),
+                     'A1binv':sparse_inverse_diagonal_matrix(keys['A1b']),
                      'A2inv':sparse_inverse_diagonal_matrix(keys['A2']),
-                     'A3inv':sparse_inverse_diagonal_matrix(keys['A3']),
+                     'A3ainv':sparse_inverse_diagonal_matrix(keys['A3a']),
+                     'A3binv':sparse_inverse_diagonal_matrix(keys['A3b']),
                      'A4inv':sparse_inverse_diagonal_matrix(keys['A4']),
-                     'A5inv':sparse_inverse_diagonal_matrix(keys['A5']),
-                     'A6inv':sparse_inverse_diagonal_matrix(keys['A6']),
+                     'A5ainv':sparse_inverse_diagonal_matrix(keys['A5a']),
+                     'A5binv':sparse_inverse_diagonal_matrix(keys['A5b']),
+                     'A6ainv':sparse_inverse_diagonal_matrix(keys['A6a']),
+                     'A6binv':sparse_inverse_diagonal_matrix(keys['A6b']),
                      'A7inv':sparse_inverse_diagonal_matrix(keys['A7'])})
 
         super(DiagonalKeyNet, self).__init__(keys)
@@ -194,42 +236,75 @@ class StochasticKeyNet(KeyNet):
     def __init__(self):
         super(StochasticKeyNet, self).__init__()
 
-        permutation_keys = {'A1':sparse_permutation_matrix(np.prod(self.shape['x1'])+1),
-                            'A2':sparse_permutation_matrix(np.prod(self.shape['x2'])+1),
-                            'A3':sparse_permutation_matrix(np.prod(self.shape['x3'])+1),
-                            'A4':sparse_permutation_matrix(np.prod(self.shape['x4'])+1),
-                            'A5':sparse_permutation_matrix(np.prod(self.shape['x5'])+1),
-                            'A6':sparse_permutation_matrix(np.prod(self.shape['x6'])+1),
-                            'A7':sparse_permutation_matrix(np.prod(self.shape['x7'])+1),}
-        
-        permutation_keys.update({'A1inv':permutation_keys['A1'].transpose(),
-                                 'A2inv':permutation_keys['A2'].transpose(),
-                                 'A3inv':permutation_keys['A3'].transpose(),
-                                 'A4inv':permutation_keys['A4'].transpose(),
-                                 'A5inv':permutation_keys['A5'].transpose(),
-                                 'A6inv':permutation_keys['A6'].transpose(),
-                                 'A7inv':permutation_keys['A7'].transpose()})
+        (A1a,A1ainv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x1a'])+1, 1) 
+        (A1b,A1binv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x1b'])+1, 1) 
+        (A2,A2inv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x2'])+1, 1)
+        (A3a,A3ainv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x3a'])+1, 1)
+        (A3b,A3binv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x3b'])+1, 1)
+        (A4,A4inv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x4'])+1, 1)
+        (A5a,A5ainv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x5a'])+1, 1)
+        (A5b,A5binv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x5b'])+1, 1)
+        (A6a,A6ainv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x6a'])+1, 1)
+        (A6b,A6binv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x6b'])+1, 1)
+        (A7,A7inv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x7'])+1, 1)
 
-        diagonal_keys = {'A1':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x1'])+1),
-                         'A2':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x2'])+1),
-                         'A3':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x3'])+1),
-                         'A4':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x4'])+1),
-                         'A5':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x5'])+1),
-                         'A6':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x6'])+1),
-                         'A7':sparse_uniform_random_diagonal_matrix(np.prod(self.shape['x7'])+1),}
-        
-        diagonal_keys.update({'A1inv':sparse_inverse_diagonal_matrix(diagonal_keys['A1']),
-                              'A2inv':sparse_inverse_diagonal_matrix(diagonal_keys['A2']),
-                              'A3inv':sparse_inverse_diagonal_matrix(diagonal_keys['A3']),
-                              'A4inv':sparse_inverse_diagonal_matrix(diagonal_keys['A4']),
-                              'A5inv':sparse_inverse_diagonal_matrix(diagonal_keys['A5']),
-                              'A6inv':sparse_inverse_diagonal_matrix(diagonal_keys['A6']),
-                              'A7inv':sparse_inverse_diagonal_matrix(diagonal_keys['A7'])})
-
-        keys = {k:diagonal_keys[k].dot(permutation_keys[k]) if 'inv' not in k else permutation_keys[k].dot(diagonal_keys[k]) for k in permutation_keys.keys()}
-        keys.update( {'A0inv':None} )
+        keys = {'A0inv':None,'A1a':A1a,'A1ainv':A1ainv,'A1b':A1b,'A1binv':A1binv,
+                'A2':A2,'A2inv':A2inv,'A3a':A3a,'A3ainv':A3ainv,'A3b':A3b,'A3binv':A3binv,
+                'A4':A4,'A4inv':A4inv,'A5a':A5a,'A5ainv':A5ainv,'A5b':A5b,'A5binv':A5binv,
+                'A6a':A6a,'A6ainv':A6ainv,'A6b':A6b,'A6binv':A6binv,
+                'A7':A7,'A7inv':A7inv}
 
         super(StochasticKeyNet, self).__init__(keys)
+
+
+class GeneralizedStochasticKeyNet(KeyNet):
+    def __init__(self, alpha=1):
+        super(GeneralizedStochasticKeyNet, self).__init__()
+
+        (A1a,A1ainv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x1a'])+1, alpha) 
+        (A1b,A1binv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x1b'])+1, 1) 
+        (A2,A2inv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x2'])+1, alpha)
+        (A3a,A3ainv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x3a'])+1, alpha)
+        (A3b,A3binv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x3b'])+1, 1)
+        (A4,A4inv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x4'])+1, alpha)
+        (A5a,A5ainv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x5a'])+1, alpha)
+        (A5b,A5binv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x5b'])+1, 1)
+        (A6a,A6ainv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x6a'])+1, alpha)
+        (A6b,A6binv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x6b'])+1, 1)
+        (A7,A7inv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x7'])+1, alpha)
+
+        keys = {'A0inv':None,'A1a':A1a,'A1ainv':A1ainv,'A1b':A1b,'A1binv':A1binv,
+                'A2':A2,'A2inv':A2inv,'A3a':A3a,'A3ainv':A3ainv,'A3b':A3b,'A3binv':A3binv,
+                'A4':A4,'A4inv':A4inv,'A5a':A5a,'A5ainv':A5ainv,'A5b':A5b,'A5binv':A5binv,
+                'A6a':A6a,'A6ainv':A6ainv,'A6b':A6b,'A6binv':A6binv,
+                'A7':A7,'A7inv':A7inv}
+
+        super(GeneralizedStochasticKeyNet, self).__init__(keys)
+
+
+class BlockKeyNet(KeyNet):
+    def __init__(self, alpha=1):
+        super(BlockKeyNet, self).__init__()
+
+        (A1a,A1ainv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x1a'])+1, alpha) 
+        (A1b,A1binv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x1b'])+1, 1) 
+        (A2,A2inv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x2'])+1, alpha)
+        (A3a,A3ainv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x3a'])+1, alpha)
+        (A3b,A3binv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x3b'])+1, 1)
+        (A4,A4inv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x4'])+1, alpha)
+        (A5a,A5ainv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x5a'])+1, alpha)
+        (A5b,A5binv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x5b'])+1, 1)
+        (A6a,A6ainv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x6a'])+1, alpha)
+        (A6b,A6binv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x6b'])+1, 1)
+        (A7,A7inv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x7'])+1, alpha)
+
+        keys = {'A0inv':None,'A1a':A1a,'A1ainv':A1ainv,'A1b':A1b,'A1binv':A1binv,
+                'A2':A2,'A2inv':A2inv,'A3a':A3a,'A3ainv':A3ainv,'A3b':A3b,'A3binv':A3binv,
+                'A4':A4,'A4inv':A4inv,'A5a':A5a,'A5ainv':A5ainv,'A5b':A5b,'A5binv':A5binv,
+                'A6a':A6a,'A6ainv':A6ainv,'A6b':A6b,'A6binv':A6binv,
+                'A7':A7,'A7inv':A7inv}
+
+        super(BlockKeyNet, self).__init__(keys)
 
 
 def train(net, modelfile, mnistdir='/proj/enigma', lr=0.003, epochs=20, transform=LeNet().transform()):

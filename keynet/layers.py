@@ -4,6 +4,8 @@ from keynet.torch import affine_augmentation_matrix, sparse_toeplitz_conv2d, spa
 import torch
 import numpy as np
 import scipy.sparse
+import torch.nn.functional as F
+
 
 class KeyedConv2d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride):
@@ -45,6 +47,19 @@ class KeyedLinear(nn.Module):
     def forward(self, x_affine):
         """x_affine=(C*U*V+1 x N)"""
         return torch.tensor(self.What.dot(x_affine))
+
+
+class KeyedRelu(nn.Module):
+    def __init__(self):
+        super(KeyedRelu, self).__init__()
+        self.What = None
+
+    def key(self, B, Ainv):
+        self.What = B*Ainv
+        return self.What
+        
+    def forward(self, x_affine):
+        return F.relu(torch.tensor(self.What.dot(x_affine)))
 
 
 class KeyedAvgpool2d(nn.Module):
