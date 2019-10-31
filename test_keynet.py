@@ -8,6 +8,7 @@ import torch.nn.functional as F
 import torch 
 import vipy.image  # bash setup
 import vipy.visualize  # bash setup
+from vipy.util import Stopwatch
 from keynet.util import sparse_permutation_matrix, sparse_identity_matrix
 from keynet.torch import affine_augmentation_tensor, affine_deaugmentation_tensor
 from keynet.torch import sparse_toeplitz_conv2d, conv2d_in_scipy
@@ -18,7 +19,7 @@ import keynet.blockpermute
 import keynet.mnist
 import keynet.cifar10
 import keynet.torch
-
+import keynet.fiberbundle
 
 def example_2x2():
     """Reproduce figure 2 in paper"""
@@ -249,7 +250,9 @@ def test_keynet_mnist():
         knet = keynet.mnist.BlockKeyNet(alpha=alpha)
         knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
         knet.eval()    
-        yh_stochastic = knet.decrypt(knet(knet.encrypt(A0, x)))
+        with Stopwatch() as sw:
+            yh_stochastic = knet.decrypt(knet(knet.encrypt(A0, x)))
+        print('Elapsed: %f sec' % sw.elapsed)
         print(y)
         print(yh_stochastic)
         assert(np.allclose(np.array(y), np.array(yh_stochastic), atol=1E-4))
@@ -264,7 +267,9 @@ def test_keynet_mnist():
         knet = keynet.mnist.GeneralizedStochasticKeyNet(alpha=alpha)
         knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
         knet.eval()    
-        yh_stochastic = knet.decrypt(knet(knet.encrypt(A0, x)))
+        with Stopwatch() as sw:
+            yh_stochastic = knet.decrypt(knet(knet.encrypt(A0, x)))
+        print('Elapsed: %f sec' % sw.elapsed)
         print(y)
         print(yh_stochastic)
         assert(np.allclose(np.array(y), np.array(yh_stochastic), atol=1E-4))
@@ -294,7 +299,10 @@ def test_keynet_cifar():
         knet = StochasticKeyNet(alpha=alpha)
         knet.eval()    
         knet.load_state_dict_keyed(torch.load('./models/cifar10_allconv.pth'), A0inv=A0inv)
-        yh = knet.decrypt(knet(knet.encrypt(A0, x)))
+        with Stopwatch() as sw:
+            yh = knet.decrypt(knet(knet.encrypt(A0, x)))
+        print('Elapsed: %f sec' % sw.elapsed)
+
         print(y)
         print(yh)
         assert (np.allclose(np.array(y).flatten(), np.array(yh).flatten(), atol=1E-5))
@@ -316,3 +324,9 @@ def test_roundoff(m=512, n=1000):
         if j % 10 == 0:
             print('[test_roundoff]: m=%d, n=%d, j=%d, |x-xh|/|x|=%1.13f, |x-xh]=%1.13f' % (m,n,j, np.max(np.abs(x-xh)/np.abs(x)), np.max(np.abs(x-xh))))
 
+
+def test_fiberbundle_simulation():
+    img_color = np.array(PIL.Image.open('owl.jpg').resize( (512,512) ))
+    img_sim = keynet.fiberbundle.simulation(img_color, h_xtalk=0.05, v_xtalk=0.05, fiber_core_x=16, fiber_core_y=16)
+    keynet.util.savetemp(np.uint8(img_sim*255))
+    

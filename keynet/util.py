@@ -9,6 +9,33 @@ import tempfile
 import os
 
 
+
+def sparse_block_diag(mats, format='coo', dtype=None):
+    """https://github.com/scipy/scipy/issues/9223"""
+    """Faster than scipy.sparse.block_diag"""
+    dtype = np.dtype(dtype)
+    row = []
+    col = []
+    data = []
+    r_idx = 0
+    c_idx = 0
+    for ia, a in enumerate(mats):
+        if scipy.sparse.issparse(a):
+            a = a.tocsr()
+        else:
+            a = scipy.sparse.coo_matrix(a).tocsr()
+        nrows, ncols = a.shape
+        for r in range(nrows):
+            for c in range(ncols):
+                if a[r, c] is not None:
+                    row.append(r + r_idx)
+                    col.append(c + c_idx)
+                    data.append(a[r, c])
+        r_idx = r_idx + nrows
+        c_idx = c_idx + ncols
+    return scipy.sparse.coo_matrix((data, (row, col)), dtype=dtype).asformat(format)
+
+
 def random_dense_positive_definite_matrix(n):
     A = np.random.rand(n,n)
     U, s, V = np.linalg.svd(np.dot(A.T, A))
@@ -112,11 +139,11 @@ def sparse_stochastic_matrix(n,m):
     P = sparse_permutation_matrix(n)
     B = [sparse_random_diagonally_dominant_doubly_stochastic_matrix(m) for j in np.arange(0,n-m,m)]
     B = B + [sparse_random_diagonally_dominant_doubly_stochastic_matrix(n-len(B)*m)]
-    S = scipy.sparse.block_diag(B, format='csr')
+    S = sparse_block_diag(B, format='csr')
     A = P*S
 
     Binv = [np.linalg.inv(b.todense()) for b in B]
-    Sinv = scipy.sparse.block_diag(Binv, format='csr')
+    Sinv = sparse_block_diag(Binv, format='csr')
     Pinv = P.transpose()
     Ainv = Sinv * Pinv
 
@@ -141,9 +168,9 @@ def sparse_positive_definite_block_diagonal(n,m):
     m = np.minimum(n,m)
     B = [random_dense_positive_definite_matrix(m) for j in np.arange(0,n-m,m)]
     B = B + [random_dense_positive_definite_matrix(n-len(B)*m)]
-    A = scipy.sparse.block_diag(B, format='csr')
+    A = sparse_block_diag(B, format='csr')
     Binv = [np.linalg.inv(b) for b in B]
-    Ainv = scipy.sparse.block_diag(Binv, format='csr')
+    Ainv = sparse_block_diag(Binv, format='csr')
     return(A,Ainv)
 
 
