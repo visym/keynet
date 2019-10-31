@@ -89,7 +89,7 @@ def sparse_random_doubly_stochastic_matrix(n, k, n_iter=100):
 def sparse_random_diagonally_dominant_doubly_stochastic_matrix(n, k=None, n_iter=100):
     """Return sparse matrix (nxn) such that at nost k elements per row are non-zero and matrix is positive definite"""
     k = n if k is None else k
-    n_iter = 10 if k<=3 else n_iter
+    n_iter = 10 if k<=3 else n_iter  # speedup
     d = np.random.rand(k,n)
     d[0,:] = np.maximum(d[0,:], np.sum(d[1:,:], axis=0) + 0.1)  # first column is greater than sum of other columns 
     d = d / np.sum(d,axis=0).reshape(1,n)  # sum over cols

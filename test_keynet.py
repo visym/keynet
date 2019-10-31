@@ -257,6 +257,7 @@ def test_keynet_mnist():
         print('BlockKeyNet (alpha=%d) parameters: %d' % (alpha, keynet.torch.count_keynet_parameters(knet)))
 
     # Generalized Stochastic KeyNet
+    # FIXME: the number of parameters isn't quite right here due to a boundary condition on keynet.util.sparse_random_diagonally_dominant_doubly_stochastic_matrix
     for alpha in [1,10,100]:
         A0 = sparse_diagonal_matrix(28*28*1 + 1)
         A0inv = sparse_inverse_diagonal_matrix(A0)
@@ -287,20 +288,21 @@ def test_keynet_cifar():
     y = net(x)
 
     # StochasticKeyNet
-    A0 = sparse_permutation_matrix(3*32*32 + 1)
-    A0inv = A0.transpose()
-    knet = StochasticKeyNet()
-    knet.eval()    
-    knet.load_state_dict_keyed(torch.load('./models/cifar10_allconv.pth'), A0inv=A0inv)
-    yh = knet.decrypt(knet(knet.encrypt(A0, x)))
-    print(y)
-    print(yh)
-    assert (np.allclose(np.array(y).flatten(), np.array(yh).flatten(), atol=1E-5))
-    print('CIFAR-10 StochasticKeyNet: passed')
-
-    print('AllConvNet parameters: %d' % keynet.torch.count_parameters(net))
-    print('StochasticKeyNet parameters: %d' % keynet.torch.count_keynet_parameters(knet))
-    return(y,yh)
+    for alpha in [1,10,100]:
+        A0 = sparse_permutation_matrix(3*32*32 + 1)
+        A0inv = A0.transpose()
+        knet = StochasticKeyNet(alpha=alpha)
+        knet.eval()    
+        knet.load_state_dict_keyed(torch.load('./models/cifar10_allconv.pth'), A0inv=A0inv)
+        yh = knet.decrypt(knet(knet.encrypt(A0, x)))
+        print(y)
+        print(yh)
+        assert (np.allclose(np.array(y).flatten(), np.array(yh).flatten(), atol=1E-5))
+        print('CIFAR-10 StochasticKeyNet (alpha=%d): passed' % alpha)
+        
+        print('AllConvNet parameters: %d' % keynet.torch.count_parameters(net))
+        print('StochasticKeyNet (alpha=%d) parameters: %d' % (alpha, keynet.torch.count_keynet_parameters(knet)))
+        return(y,yh)
 
 
 def test_roundoff(m=512, n=1000):
