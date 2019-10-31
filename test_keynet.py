@@ -13,7 +13,6 @@ from keynet.torch import affine_augmentation_tensor, affine_deaugmentation_tenso
 from keynet.torch import sparse_toeplitz_conv2d, conv2d_in_scipy
 from keynet.torch import sparse_toeplitz_avgpool2d, avgpool2d_in_scipy
 from keynet.util import sparse_diagonal_matrix, sparse_inverse_diagonal_matrix, random_dense_positive_definite_matrix
-from keynet.util import sparse_generalized_stochastic_matrix
 import keynet.util
 import keynet.blockpermute
 import keynet.mnist
@@ -243,6 +242,20 @@ def test_keynet_mnist():
     print('MNIST StochasticKeyNet: passed')
     print('StochasticKeyNet parameters: %d' % keynet.torch.count_keynet_parameters(knet))
 
+    # Block KeyNet
+    for alpha in [1,10,100]:
+        A0 = sparse_diagonal_matrix(28*28*1 + 1)
+        A0inv = sparse_inverse_diagonal_matrix(A0)
+        knet = keynet.mnist.BlockKeyNet(alpha=alpha)
+        knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
+        knet.eval()    
+        yh_stochastic = knet.decrypt(knet(knet.encrypt(A0, x)))
+        print(y)
+        print(yh_stochastic)
+        assert(np.allclose(np.array(y), np.array(yh_stochastic), atol=1E-4))
+        print('MNIST BlockKeyNet (alpha=%d): passed' % alpha)
+        print('BlockKeyNet (alpha=%d) parameters: %d' % (alpha, keynet.torch.count_keynet_parameters(knet)))
+
     # Generalized Stochastic KeyNet
     for alpha in [1,10,100]:
         A0 = sparse_diagonal_matrix(28*28*1 + 1)
@@ -257,19 +270,6 @@ def test_keynet_mnist():
         print('MNIST GeneralizedStochasticKeyNet (alpha=%d): passed' % alpha)
         print('GeneralizedStochasticKeyNet (alpha=%d) parameters: %d' % (alpha, keynet.torch.count_keynet_parameters(knet)))
 
-    # Block KeyNet
-    for alpha in [1,10,100]:
-        A0 = sparse_diagonal_matrix(28*28*1 + 1)
-        A0inv = sparse_inverse_diagonal_matrix(A0)
-        knet = keynet.mnist.BlockKeyNet(alpha=alpha)
-        knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
-        knet.eval()    
-        yh_stochastic = knet.decrypt(knet(knet.encrypt(A0, x)))
-        print(y)
-        print(yh_stochastic)
-        assert(np.allclose(np.array(y), np.array(yh_stochastic), atol=1E-4))
-        print('MNIST BlockKeyNet (alpha=%d): passed' % alpha)
-        print('BlockKeyNet (alpha=%d) parameters: %d' % (alpha, keynet.torch.count_keynet_parameters(knet)))
 
     
 def test_keynet_cifar():
