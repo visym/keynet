@@ -236,17 +236,17 @@ class StochasticKeyNet(KeyNet):
     def __init__(self):
         super(StochasticKeyNet, self).__init__()
 
-        (A1a,A1ainv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x1a'])+1, 1) 
-        (A1b,A1binv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x1b'])+1, 1) 
-        (A2,A2inv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x2'])+1, 1)
-        (A3a,A3ainv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x3a'])+1, 1)
-        (A3b,A3binv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x3b'])+1, 1)
-        (A4,A4inv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x4'])+1, 1)
-        (A5a,A5ainv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x5a'])+1, 1)
-        (A5b,A5binv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x5b'])+1, 1)
-        (A6a,A6ainv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x6a'])+1, 1)
-        (A6b,A6binv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x6b'])+1, 1)
-        (A7,A7inv) = sparse_generalized_stochastic_block_matrix(np.prod(self.shape['x7'])+1, 1)
+        (A1a,A1ainv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x1a'])+1, 1) 
+        (A1b,A1binv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x1b'])+1, 1) 
+        (A2,A2inv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x2'])+1, 1)
+        (A3a,A3ainv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x3a'])+1, 1)
+        (A3b,A3binv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x3b'])+1, 1)
+        (A4,A4inv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x4'])+1, 1)
+        (A5a,A5ainv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x5a'])+1, 1)
+        (A5b,A5binv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x5b'])+1, 1)
+        (A6a,A6ainv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x6a'])+1, 1)
+        (A6b,A6binv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x6b'])+1, 1)
+        (A7,A7inv) = sparse_generalized_permutation_block_matrix(np.prod(self.shape['x7'])+1, 1)
 
         keys = {'A0inv':None,'A1a':A1a,'A1ainv':A1ainv,'A1b':A1b,'A1binv':A1binv,
                 'A2':A2,'A2inv':A2inv,'A3a':A3a,'A3ainv':A3ainv,'A3b':A3b,'A3binv':A3binv,
