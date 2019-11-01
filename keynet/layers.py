@@ -26,7 +26,7 @@ class KeyedConv2d(nn.Module):
 
     def forward(self, x_affine):
         """x_affine=(C*U*V+1 x N)"""
-        return torch.tensor(self.What.dot(x_affine))
+        return torch.as_tensor(self.What.dot(x_affine.numpy()))
 
 
 class KeyedLinear(nn.Module):
@@ -46,7 +46,7 @@ class KeyedLinear(nn.Module):
         
     def forward(self, x_affine):
         """x_affine=(C*U*V+1 x N)"""
-        return torch.tensor(self.What.dot(x_affine))
+        return torch.as_tensor(self.What.dot(x_affine.numpy()))
 
 
 class KeyedRelu(nn.Module):
@@ -59,7 +59,7 @@ class KeyedRelu(nn.Module):
         return self.What
         
     def forward(self, x_affine):
-        return F.relu(torch.tensor(self.What.dot(x_affine)))
+        return F.relu(torch.as_tensor(self.What.dot(x_affine.numpy())))
 
 
 class KeyedAvgpool2d(nn.Module):
@@ -74,7 +74,8 @@ class KeyedAvgpool2d(nn.Module):
 
     def forward(self, x_affine):
         """x_affine=(C*U*V+1 x N)"""
-        return torch.tensor(self.What.dot(x_affine))
+        """.as_tensor() shares memory, avoids copy"""
+        return torch.as_tensor(self.What.dot(x_affine.numpy()))
 
 
 def fuse_conv2d_and_bn(conv2d_weight, conv2d_bias, bn_running_mean, bn_running_var, bn_eps, bn_weight, bn_bias):

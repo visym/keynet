@@ -63,11 +63,12 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1)
                     # For every kernel_col (transposed)
                     for (j,q) in enumerate(Q_range if as_correlation else reversed(Q_range)):
                         # For every outchannel
-                        for (k_outchannel, c_outchannel) in enumerate(M_range if as_correlation else reversed(M_range)):
-                            if ((u+p)>=0 and (v+q)>=0 and (u+p)<U and (v+q)<V):
+                        if ((u+p)>=0 and (v+q)>=0 and (u+p)<U and (v+q)<V):
+                            c = np.ravel_multi_index( (c_inchannel, u+p, v+q), (C,U,V) )
+                            for (k_outchannel, c_outchannel) in enumerate(M_range if as_correlation else reversed(M_range)):
                                 data.append(f[k_outchannel,k_inchannel,i,j])
                                 row_ind.append( np.ravel_multi_index( (c_outchannel,ku,kv), (M,U//stride,V//stride) ) )
-                                col_ind.append( np.ravel_multi_index( (c_inchannel, u+p, v+q), (C,U,V) ))
+                                col_ind.append( c )
 
     # Sparse matrix with optional bias using affine augmentation 
     T = csr_matrix((data, (row_ind, col_ind)), shape=(M*(U//stride)*(V//stride), C*U*V))

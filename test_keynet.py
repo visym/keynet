@@ -186,12 +186,27 @@ def test_keynet_mnist():
     np.random.seed(0)
 
     # LeNet
+    net = keynet.mnist.LeNet()
+    net.load_state_dict(torch.load('./models/mnist_lenet.pth'))
+    net.eval()
+    with Stopwatch() as sw:
+        for j in range(0,10):
+            x = torch.tensor(np.random.rand(2,1,28,28).astype(np.float32))
+            y = net(x)
+    print('Elapsed: %f sec' % (sw.elapsed/10.0))
+    print('LeNet parameters: %d' % keynet.torch.count_parameters(net))
+
+
+    # LeNet
     net = keynet.mnist.LeNet_AvgPool()
     net.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'))
     net.eval()
-    x = torch.tensor(np.random.rand(2,1,28,28).astype(np.float32))
-    y = net(x)
-    print('LeNet parameters: %d' % keynet.torch.count_parameters(net))
+    with Stopwatch() as sw:
+        for j in range(0,10):
+            x = torch.tensor(np.random.rand(2,1,28,28).astype(np.float32))
+            y = net(x)
+    print('Elapsed: %f sec' % (sw.elapsed/10.0))
+    print('LeNet_AvgPool parameters: %d' % keynet.torch.count_parameters(net))
 
     # Identity KeyNet
     A0 = sparse_identity_matrix(28*28*1 + 1)
@@ -289,8 +304,11 @@ def test_keynet_cifar():
     net.eval()
     net.load_state_dict(torch.load('./models/cifar10_allconv.pth'))
 
-    x = torch.tensor(np.random.rand(2,3,32,32).astype(np.float32))
-    y = net(x)
+    with Stopwatch() as sw:
+        for j in range(0,10):
+            x = torch.tensor(np.random.rand(2,3,32,32).astype(np.float32))
+            y = net(x)
+    print('Elapsed: %f sec' % (sw.elapsed/10.0))
 
     # StochasticKeyNet
     for alpha in [1,10,100]:
@@ -310,7 +328,6 @@ def test_keynet_cifar():
         
         print('AllConvNet parameters: %d' % keynet.torch.count_parameters(net))
         print('StochasticKeyNet (alpha=%d) parameters: %d' % (alpha, keynet.torch.count_keynet_parameters(knet)))
-        return(y,yh)
 
 
 def test_roundoff(m=512, n=1000):
@@ -327,6 +344,14 @@ def test_roundoff(m=512, n=1000):
 
 def test_fiberbundle_simulation():
     img_color = np.array(PIL.Image.open('owl.jpg').resize( (512,512) ))
-    img_sim = keynet.fiberbundle.simulation(img_color, h_xtalk=0.05, v_xtalk=0.05, fiber_core_x=16, fiber_core_y=16)
-    keynet.util.savetemp(np.uint8(img_sim*255))
+    img_sim = keynet.fiberbundle.simulation(img_color, h_xtalk=0.05, v_xtalk=0.05, fiber_core_x=16, fiber_core_y=16, do_camera_noise=True)
+    keynet.util.savetemp(np.uint8(img_sim))
+
+
+def test_fiberbundle_simulation_32x32():
+    img_color_large = np.array(PIL.Image.open('owl.jpg').resize( (512,512), PIL.Image.BICUBIC ))  
+    img_sim_large = keynet.fiberbundle.simulation(img_color_large, h_xtalk=0.05, v_xtalk=0.05, fiber_core_x=16, fiber_core_y=16, do_camera_noise=False)
+    img_sim = np.array(PIL.Image.fromarray(np.uint8(img_sim_large)).resize( (32,32), PIL.Image.BICUBIC ).resize( (512,512), PIL.Image.NEAREST ))
+    #keynet.util.savetemp(np.uint8(img_color_large))
+    keynet.util.savetemp(np.uint8(img_sim))
     
