@@ -36,10 +36,10 @@ def sparse_block_diag(mats, format='coo', dtype=None):
     return scipy.sparse.coo_matrix((data, (row, col)), dtype=dtype).asformat(format)
 
 
-def random_dense_positive_definite_matrix(n):
-    A = np.random.rand(n,n)
+def random_dense_positive_definite_matrix(n, dtype=np.float32):
+    A = np.random.rand(n,n).astype(dtype)
     U, s, V = np.linalg.svd(np.dot(A.T, A))
-    X = np.dot(np.dot(U, 1.0 + np.diag(np.random.rand(n))), V)
+    X = np.dot(np.dot(U, 1.0 + np.diag(np.random.rand(n).astype(dtype))), V)
     return X
 
 def random_dense_permutation_matrix(n):
@@ -82,20 +82,20 @@ def savetemp(img):
     PIL.Image.fromarray(img.astype(np.uint8)).save(f)
     return f
 
-def sparse_permutation_matrix(n):
-    data = np.ones(n).astype(np.float32)
+def sparse_permutation_matrix(n, dtype=np.float32):
+    data = np.ones(n).astype(dtype)
     row_ind = list(range(0,n))
     col_ind = np.random.permutation(list(range(0,n)))
     return csr_matrix((data, (row_ind, col_ind)), shape=(n,n))
 
-def sparse_identity_matrix(n):
-    return scipy.sparse.eye(n, dtype=np.float32)
+def sparse_identity_matrix(n, dtype=np.float32):
+    return scipy.sparse.eye(n, dtype=dtype)
 
 def sparse_gaussian_random_diagonal_matrix(n,mu=1,sigma=1,eps=1E-6):
     return scipy.sparse.diags(np.maximum(eps, np.array(sigma*np.random.randn(n)+mu).astype(np.float32)))
 
-def sparse_uniform_random_diagonal_matrix(n,scale=1,eps=1E-6):
-    return scipy.sparse.diags(np.array(scale*np.random.rand(n) + eps).astype(np.float32))
+def sparse_uniform_random_diagonal_matrix(n, scale=1, eps=1E-6, dtype=np.float32):
+    return scipy.sparse.diags(np.array(scale*np.random.rand(n) + eps).astype(dtype))
 
 def sparse_diagonal_matrix(n):
     return sparse_uniform_random_diagonal_matrix(n, scale=1, eps=1E-6)
@@ -149,7 +149,18 @@ def sparse_stochastic_matrix(n,m):
 
     return(A,Ainv)
 
-def sparse_generalized_stochastic_block_matrix(n,m):
+
+def sparse_positive_definite_block_diagonal(n, m, dtype=np.float32):
+    m = np.minimum(n,m)
+    B = [random_dense_positive_definite_matrix(m,dtype) for j in np.arange(0,n-m,m)]
+    B = B + [random_dense_positive_definite_matrix(n-len(B)*m, dtype)]
+    A = sparse_block_diag(B, format='csr')
+    Binv = [np.linalg.inv(b) for b in B]
+    Ainv = sparse_block_diag(Binv, format='csr')
+    return(A,Ainv)
+
+
+def sparse_generalized_stochastic_block_matrix(n,m,dtype=np.float32):
     """Returns (A,Ainv) for (nxn) sparse matrix of the form P*S*D, where D is uniform random diagonal, S is stochastic block matrix of size m, and P is permutation"""
     """Setting m=1 results in scaled permutation matrix"""
     #assert(k<=m and n>=m) 
@@ -161,33 +172,22 @@ def sparse_generalized_stochastic_block_matrix(n,m):
     Dinv = sparse_inverse_diagonal_matrix(D)
     Ainv = Dinv * Minv
 
-    return(A,Ainv)
+    return(A.astype(np.float32), Ainv.astype(np.float32))
 
-
-def sparse_positive_definite_block_diagonal(n,m):
-    m = np.minimum(n,m)
-    B = [random_dense_positive_definite_matrix(m) for j in np.arange(0,n-m,m)]
-    B = B + [random_dense_positive_definite_matrix(n-len(B)*m)]
-    A = sparse_block_diag(B, format='csr')
-    Binv = [np.linalg.inv(b) for b in B]
-    Ainv = sparse_block_diag(Binv, format='csr')
-    return(A,Ainv)
-
-
-def sparse_generalized_permutation_block_matrix(n,m):
+def sparse_generalized_permutation_block_matrix(n, m, dtype=np.float32):
     """Returns (A,Ainv) for (nxn) sparse matrix of the form B*P*D, where D is uniform random diagonal, B is block diagonal of size m, and P is permutation"""
     """Setting m=k=1 results in scaled permutation matrix"""
     m = np.minimum(n,m)
 
-    (B,Binv) = sparse_positive_definite_block_diagonal(n,m)
-    D = sparse_uniform_random_diagonal_matrix(n)
-    P = sparse_permutation_matrix(n)
+    (B,Binv) = sparse_positive_definite_block_diagonal(n,m,dtype=np.float64)
+    D = sparse_uniform_random_diagonal_matrix(n,dtype=np.float64)
+    P = sparse_permutation_matrix(n,dtype=np.float64)
     A = B*P*D
     Dinv = sparse_inverse_diagonal_matrix(D)
     Pinv = P.transpose()
     Ainv = Dinv * Pinv * Binv
 
-    return(A,Ainv)
+    return(A.astype(dtype), Ainv.astype(dtype))
 
 
 

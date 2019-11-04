@@ -371,6 +371,100 @@ def allconvnet():
     validate(net, transform=transform)
     
 
+
+def lenet_avgpool_fiberbundle(do_mean_estimation=True, mnistdir='/proj/enigma'):
+    # Mean
+    if do_mean_estimation:
+        transform = transforms.Compose([transforms.Lambda(lambda img: keynet.fiberbundle.transform(img.convert('RGB'), (28,28))),
+                                        transforms.Grayscale(),
+                                        transforms.Resize( (28,28) ),
+                                        transforms.ToTensor()])
+    
+        trainset = torchvision.datasets.MNIST(root='/proj/enigma', train=True, download=True, transform=transform)
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=1, shuffle=True, num_workers=32)
+        imglist = []
+        for (k, (images,labels)) in enumerate(trainloader):
+            imglist.append(images)
+            if k > 1024:
+                break
+        mu = np.mean(np.array(images).flatten())
+        std = np.std(np.array(images).flatten())
+        print(mu,std)
+    else:
+        (mu, std) = (0.46616146, 0.06223659)
+
+    # Load full transformed dataset in memory (parallelized)
+    transform = transforms.Compose([transforms.Lambda(lambda img: keynet.fiberbundle.transform(img.convert('RGB'), (28,28))),
+                                    transforms.Grayscale(),
+                                    transforms.Resize( (28,28) ),
+                                    transforms.ToTensor(),
+                                    transforms.Normalize((mu,), (std,))])
+
+    trainset = torchvision.datasets.MNIST(root=mnistdir, train=True, download=True, transform=transform)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=32)
+    trainpreload = [(x,y) for (x,y) in trainloader]
+    testset = torchvision.datasets.MNIST(root=mnistdir, train=False, download=True, transform=transform)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=32, shuffle=False, num_workers=32)
+    testpreload = [(x,y) for (x,y) in testloader]
+
+    # Validate (lenet)
+    net1 = keynet.mnist.LeNet_AvgPool()
+    net1.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'))
+    keynet.cifar10.validate(net1, testloader=testpreload)
+
+    # Re-train and Re-validate (lenet)
+    net2 = keynet.mnist.LeNet_AvgPool()
+    keynet.cifar10.train(net2, modelfile='./models/mnist_lenet_avgpool_fiberbundle.pth', lr=0.004, epochs=40, trainloader=trainpreload)
+    net3 = keynet.mnist.LeNet_AvgPool()
+    net3.load_state_dict(torch.load('./models/mnist_lenet_avgpool_fiberbundle.pth'))
+    keynet.cifar10.validate(net3, testloader=testpreload)
+
+
+def allconv_fiberbundle(do_mean_estimation=True, mnistdir='/proj/enigma'):
+    # Mean
+    if do_mean_estimation:
+        transform = transforms.Compose([transforms.Lambda(lambda img: keynet.fiberbundle.transform(img.convert('RGB'), (32,32))),
+                                        transforms.Grayscale(),
+                                        transforms.ToTensor()])
+    
+        trainset = torchvision.datasets.MNIST(root='/proj/enigma', train=True, download=True, transform=transform)
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=1024, shuffle=True, num_workers=32)
+        for (images,labels) in trainloader:
+            mu = np.mean(np.array(images), axis=(0,2,3))
+            std = np.std(np.array(images), axis=(0,2,3))
+            break
+        print(mu,std)
+    else:
+        (mu, std) = ([0.34499013,], [0.12154603,])
+
+    # Load full transformed dataset in memory (parallelized)
+    transform = transforms.Compose([transforms.Lambda(lambda img: keynet.fiberbundle.transform(img.convert('RGB'), (32,32))),
+                                    transforms.Grayscale(),
+                                    transforms.ToTensor(),
+                                    transforms.Normalize(mu, std)])
+                                        
+    trainset = torchvision.datasets.MNIST(root=mnistdir, train=True, download=True, transform=transform)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=32)
+    trainpreload = [(x,y) for (x,y) in trainloader]
+    testset = torchvision.datasets.MNIST(root=mnistdir, train=False, download=True, transform=transform)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=32, shuffle=False, num_workers=32)
+    testpreload = [(x,y) for (x,y) in testloader]
+
+    # Validate (allconv)
+    net1 = keynet.cifar10.AllConvNet(1)
+    net1.load_state_dict(torch.load('./models/mnist_allconvnet.pth'))
+    keynet.cifar10.validate(net1, testloader=testpreload)
+
+    # Re-train and Re-validate (lenet)
+    net2 = keynet.cifar10.AllConvNet(1)
+    keynet.cifar10.train(net2, modelfile='./models/mnist_allconvnet_fiberbundle.pth', lr=0.003, epochs=40, trainloader=trainpreload)
+    net3 = keynet.cifar10.AllConvNet(1)
+    net3.load_state_dict(torch.load('./models/mnist_allconvnet_fiberbundle.pth'))
+    keynet.cifar10.validate(net3, testloader=testpreload)
+
+
+
+
 def keynet_alpha1():
     net = PermutationKeyNet()
     A0 = sparse_permutation_matrix(28*28*1 + 1)
@@ -391,3 +485,5 @@ def keynet_alpha1_allconv():
 
     net.load_state_dict_keyed(torch.load('./models/mnist_allconvnet.pth'), A0inv)
     validate(net, secretkey=A0, transform=transform)
+
+

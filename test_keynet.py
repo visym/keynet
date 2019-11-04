@@ -9,7 +9,7 @@ import torch
 import vipy.image  # bash setup
 import vipy.visualize  # bash setup
 from vipy.util import Stopwatch
-from keynet.util import sparse_permutation_matrix, sparse_identity_matrix
+from keynet.util import sparse_permutation_matrix, sparse_identity_matrix, sparse_generalized_permutation_block_matrix, sparse_generalized_stochastic_block_matrix
 from keynet.torch import affine_augmentation_tensor, affine_deaugmentation_tensor
 from keynet.torch import sparse_toeplitz_conv2d, conv2d_in_scipy
 from keynet.torch import sparse_toeplitz_avgpool2d, avgpool2d_in_scipy
@@ -20,6 +20,7 @@ import keynet.mnist
 import keynet.cifar10
 import keynet.torch
 import keynet.fiberbundle
+from torch import nn
 
 def example_2x2():
     """Reproduce figure 2 in paper"""
@@ -184,28 +185,26 @@ def test_sparse_toeplitz_avgpool2d():
 def test_keynet_mnist():
     torch.set_grad_enabled(False)
     np.random.seed(0)
+    X = [torch.tensor(np.random.rand(1,1,28,28).astype(np.float32)) for j in range(0,16)]
 
     # LeNet
     net = keynet.mnist.LeNet()
     net.load_state_dict(torch.load('./models/mnist_lenet.pth'))
     net.eval()
     with Stopwatch() as sw:
-        for j in range(0,10):
-            x = torch.tensor(np.random.rand(2,1,28,28).astype(np.float32))
-            y = net(x)
-    print('Elapsed: %f sec' % (sw.elapsed/10.0))
+        y = [net(x) for x in X]
+    with Stopwatch() as sw:
+        y = [net(x) for x in X]
+    print('Elapsed: %f sec' % (sw.elapsed/len(X)))
     print('LeNet parameters: %d' % keynet.torch.count_parameters(net))
 
-
-    # LeNet
+    # LeNet-AvgPool
     net = keynet.mnist.LeNet_AvgPool()
     net.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'))
     net.eval()
     with Stopwatch() as sw:
-        for j in range(0,10):
-            x = torch.tensor(np.random.rand(2,1,28,28).astype(np.float32))
-            y = net(x)
-    print('Elapsed: %f sec' % (sw.elapsed/10.0))
+        y = [net(x) for x in X]
+    print('Elapsed: %f sec' % (sw.elapsed/len(X)))
     print('LeNet_AvgPool parameters: %d' % keynet.torch.count_parameters(net))
 
     # Identity KeyNet
@@ -214,8 +213,8 @@ def test_keynet_mnist():
     knet = keynet.mnist.KeyNet()
     knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
     knet.eval()    
-    yh_identity = knet.decrypt(knet(knet.encrypt(A0, x)))
-    assert(np.allclose(np.array(y), np.array(yh_identity)))
+    yh_identity = knet.decrypt(knet(knet.encrypt(A0, X[0])))
+    assert(np.allclose(np.array(y[0]), np.array(yh_identity)))
     print('MNIST IdentityKeyNet: passed')
     print('IdentityKeyNet parameters: %d' % keynet.torch.count_keynet_parameters(knet))
 
@@ -225,9 +224,9 @@ def test_keynet_mnist():
     knet = keynet.mnist.PermutationKeyNet()
     knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
     knet.eval()    
-    yh_permutation = knet.decrypt(knet(knet.encrypt(A0, x)))
+    yh_permutation = knet.decrypt(knet(knet.encrypt(A0, X[0])))
     fc3_permutation = knet.fc3.What
-    assert(np.allclose(np.array(y), np.array(yh_permutation)))
+    assert(np.allclose(np.array(y[0]), np.array(yh_permutation)))
     print('MNIST PermutationKeyNet: passed')
     print('PermutationKeyNet parameters: %d' % keynet.torch.count_keynet_parameters(knet))
 
@@ -237,9 +236,9 @@ def test_keynet_mnist():
     knet = keynet.mnist.DiagonalKeyNet()
     knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
     knet.eval()    
-    yh_diagonal = knet.decrypt(knet(knet.encrypt(A0, x)))
+    yh_diagonal = knet.decrypt(knet(knet.encrypt(A0, X[0])))
     fc3_diagonal = knet.fc3.What
-    assert(np.allclose(np.array(y), np.array(yh_diagonal)))
+    assert(np.allclose(np.array(y[0]), np.array(yh_diagonal)))
     print('MNIST DiagonalKeyNet: passed')
     print('DiagonalKeyNet parameters: %d' % keynet.torch.count_keynet_parameters(knet))
 
@@ -253,51 +252,56 @@ def test_keynet_mnist():
     knet = keynet.mnist.StochasticKeyNet()
     knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
     knet.eval()    
-    yh_stochastic = knet.decrypt(knet(knet.encrypt(A0, x)))
-    assert(np.allclose(np.array(y), np.array(yh_stochastic)))
+    yh_stochastic = knet.decrypt(knet(knet.encrypt(A0, X[0])))
+    assert(np.allclose(np.array(y[0]), np.array(yh_stochastic)))
     print('MNIST StochasticKeyNet: passed')
     print('StochasticKeyNet parameters: %d' % keynet.torch.count_keynet_parameters(knet))
 
     # Block KeyNet
-    for alpha in [1,10,100]:
+    for alpha in [1,2,4]:
         A0 = sparse_diagonal_matrix(28*28*1 + 1)
         A0inv = sparse_inverse_diagonal_matrix(A0)
         knet = keynet.mnist.BlockKeyNet(alpha=alpha)
         knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
         knet.eval()    
+        Xh = [knet.encrypt(A0, x) for x in X]
         with Stopwatch() as sw:
-            yh_stochastic = knet.decrypt(knet(knet.encrypt(A0, x)))
-        print('Elapsed: %f sec' % sw.elapsed)
-        print(y)
-        print(yh_stochastic)
-        assert(np.allclose(np.array(y), np.array(yh_stochastic), atol=1E-4))
+            yh_stochastic = [knet.decrypt(knet(xh)) for xh in Xh]
+        with Stopwatch() as sw:
+            yh_stochastic = [knet.decrypt(knet(xh)) for xh in Xh]
+        print('Elapsed: %f sec' % (sw.elapsed/len(X)))
+        print(y[0])
+        print(yh_stochastic[0])
+        assert(np.allclose(np.array(y[0]), np.array(yh_stochastic[0]), atol=1E-1))
         print('MNIST BlockKeyNet (alpha=%d): passed' % alpha)
         print('BlockKeyNet (alpha=%d) parameters: %d' % (alpha, keynet.torch.count_keynet_parameters(knet)))
 
     # Generalized Stochastic KeyNet
     # FIXME: the number of parameters isn't quite right here due to a boundary condition on keynet.util.sparse_random_diagonally_dominant_doubly_stochastic_matrix
-    for alpha in [1,10,100]:
+    for alpha in [1,2,4]:
         A0 = sparse_diagonal_matrix(28*28*1 + 1)
         A0inv = sparse_inverse_diagonal_matrix(A0)
         knet = keynet.mnist.GeneralizedStochasticKeyNet(alpha=alpha)
         knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
         knet.eval()    
+        Xh = [knet.encrypt(A0, x) for x in X]
         with Stopwatch() as sw:
-            yh_stochastic = knet.decrypt(knet(knet.encrypt(A0, x)))
-        print('Elapsed: %f sec' % sw.elapsed)
-        print(y)
-        print(yh_stochastic)
-        assert(np.allclose(np.array(y), np.array(yh_stochastic), atol=1E-4))
+            yh_stochastic = [knet.decrypt(knet(xh)) for xh in Xh]
+        with Stopwatch() as sw:
+            yh_stochastic = [knet.decrypt(knet(xh)) for xh in Xh]
+        print('Elapsed: %f sec' % (sw.elapsed/len(X)))
+        assert(np.allclose(np.array(y[0]), np.array(yh_stochastic[0]), atol=1E-4))
         print('MNIST GeneralizedStochasticKeyNet (alpha=%d): passed' % alpha)
         print('GeneralizedStochasticKeyNet (alpha=%d) parameters: %d' % (alpha, keynet.torch.count_keynet_parameters(knet)))
 
 
     
-def test_keynet_cifar():
+def test_keynet_cifar10():
     from keynet.cifar10 import AllConvNet, StochasticKeyNet
 
     torch.set_grad_enabled(False)
     np.random.seed(0)
+    X = [torch.tensor(np.random.rand(1,3,32,32).astype(np.float32)) for j in range(0,16)]
 
     # AllConvNet
     net = AllConvNet()
@@ -305,25 +309,27 @@ def test_keynet_cifar():
     net.load_state_dict(torch.load('./models/cifar10_allconv.pth'))
 
     with Stopwatch() as sw:
-        for j in range(0,10):
-            x = torch.tensor(np.random.rand(2,3,32,32).astype(np.float32))
-            y = net(x)
-    print('Elapsed: %f sec' % (sw.elapsed/10.0))
+        y = [net(x) for x in X]
+    with Stopwatch() as sw:
+        y = [net(x) for x in X]
+    print('AllConvNet Elapsed: %f sec' % (sw.elapsed/len(X)))
 
     # StochasticKeyNet
-    for alpha in [1,10,100]:
+    for alpha in [1,2,4]:
         A0 = sparse_permutation_matrix(3*32*32 + 1)
         A0inv = A0.transpose()
         knet = StochasticKeyNet(alpha=alpha)
         knet.eval()    
         knet.load_state_dict_keyed(torch.load('./models/cifar10_allconv.pth'), A0inv=A0inv)
+        Xh = [knet.encrypt(A0, x) for x in X]
         with Stopwatch() as sw:
-            yh = knet.decrypt(knet(knet.encrypt(A0, x)))
-        print('Elapsed: %f sec' % sw.elapsed)
+            yh = [knet.decrypt(knet(xh)) for xh in Xh]
+        with Stopwatch() as sw:
+            yh = [knet.decrypt(knet(xh)) for xh in Xh]
+        print('Keyed-AllConvNet (alpha=%d) Elapsed: %f sec' % (alpha, sw.elapsed/len(X)))
 
-        print(y)
-        print(yh)
-        assert (np.allclose(np.array(y).flatten(), np.array(yh).flatten(), atol=1E-5))
+        print(y[0], yh[0])
+        assert (np.allclose(np.array(y[0]).flatten(), np.array(yh[0]).flatten(), atol=1E-1))
         print('CIFAR-10 StochasticKeyNet (alpha=%d): passed' % alpha)
         
         print('AllConvNet parameters: %d' % keynet.torch.count_parameters(net))
@@ -354,4 +360,88 @@ def test_fiberbundle_simulation_32x32():
     img_sim = np.array(PIL.Image.fromarray(np.uint8(img_sim_large)).resize( (32,32), PIL.Image.BICUBIC ).resize( (512,512), PIL.Image.NEAREST ))
     #keynet.util.savetemp(np.uint8(img_color_large))
     keynet.util.savetemp(np.uint8(img_sim))
+
     
+def test_semantic_security():
+    W = sparse_toeplitz_conv2d( (1,8,8), np.ones( (1,1,3,3) ))
+    (B,Binv) = sparse_generalized_stochastic_block_matrix(65,1)
+    (A,Ainv) = sparse_generalized_permutation_block_matrix(65,2)
+    What = B*W*Ainv
+    print([what.nnz - w.nnz for (what, w) in zip(What.tocsr(), W.tocsr())])
+    assert(np.all([what.nnz > w.nnz for (what, w) in zip(What.tocsr(), W.tocsr())]))
+    print(What.nnz)
+    What = W*Ainv
+    assert(What.nnz > W.nnz)
+
+    print('test_semantic_security: passed')
+    # FIXME: A,Ainv are negative in general for permutation, Ainv is nevative for stochastic
+    # If Ainv is nevative, then AWAinv -> A(WAinv_+ - WAinv_-) and same as before to recover A, which can be used to recover W and Ainv
+
+
+def test_sparse_multiply():
+    (n_outchannel, n_inchannel, width, height, kernelsize) = (32,16,128,128,3)
+    #(n_outchannel, n_inchannel, width, height, kernelsize) = (6,3,8,8,3)
+
+    f = nn.Conv2d(n_inchannel, n_outchannel, kernelsize, padding=1)     
+    W = sparse_toeplitz_conv2d( (n_inchannel,width,height), np.ones( (n_outchannel,n_inchannel,kernelsize,kernelsize) ))
+    W_torch = keynet.torch.scipy_coo_to_torch_sparse(W)
+    W = W.tocsr()
+    (A,Ainv) = sparse_generalized_permutation_block_matrix(n_inchannel*width*height+1, 1) 
+    (B,Binv) = sparse_generalized_permutation_block_matrix(n_outchannel*width*height+1, 1) 
+    W_keynet = B*W*Ainv  
+    W_keynet_torch = keynet.torch.scipy_coo_to_torch_sparse(W_keynet.tocoo())
+
+    X_numpy = [np.random.rand( 1,n_inchannel,width,height ).astype(np.float32) for j in range(0,10)]
+    X_torch = [torch.tensor(x) for x in X_numpy]
+    X_torch_keynet = [affine_augmentation_tensor(x) for x in X_torch]
+    X_numpy_keynet = [np.array(x) for x in X_torch_keynet]
+
+    with Stopwatch() as sw:
+        y = [f(x) for x in X_torch]
+    print('pytorch conv2d (cpu): %f ms' % (1000*sw.elapsed/len(X_torch)))
+
+    with Stopwatch() as sw:
+        y = [torch.sparse.mm(W_torch, x) for x in X_torch_keynet]
+    print('pytorch sparse conv2d (cpu): %f ms' % (1000*sw.elapsed/len(X_torch_keynet)))
+
+    with Stopwatch() as sw:
+        y = [torch.sparse.mm(W_keynet_torch, x) for x in X_torch_keynet]
+    print('pytorch sparse conv2d permuted (cpu): %f ms' % (1000*sw.elapsed/len(X_torch_keynet)))
+
+
+    with Stopwatch() as sw:
+        y = [W.dot(x) for x in X_numpy_keynet]
+    print('numpy sparse conv2d (cpu): %f ms' % (1000*sw.elapsed/len(X_numpy_keynet)))
+
+    with Stopwatch() as sw:
+        y = [torch.as_tensor(W.dot(x.numpy())) for x in X_torch_keynet]
+    print('numpy sparse conv2d with torch conversion (cpu): %f ms' % (1000*sw.elapsed/len(X_torch_keynet)))
+
+    with Stopwatch() as sw:
+        y = [W_keynet.dot(x) for x in X_numpy_keynet]
+    print('numpy sparse conv2d permuted (cpu): %f ms' % (1000*sw.elapsed/len(X_numpy_keynet)))
+
+    with Stopwatch() as sw:
+        y = [torch.as_tensor(W_keynet.dot(x.numpy())) for x in X_torch_keynet]
+    print('numpy sparse conv2d permuted with torch conversion (cpu): %f ms' % (1000*sw.elapsed/len(X_torch_keynet)))
+
+    f_gpu = f.cuda(0)
+    X_torch_gpu = [x.cuda(0) for x in X_torch]    
+    with Stopwatch() as sw:
+        for j in range(0,len(X_torch)):
+            y = f_gpu(X_torch_gpu[j])
+    print('pytorch conv2d (gpu): %f ms' % (1000*sw.elapsed/len(X_torch_gpu)))
+
+    W_torch_gpu = W_torch.cuda(1)
+    X_torch_keynet_gpu = [x.cuda(1) for x in X_torch_keynet]    
+    with Stopwatch() as sw:
+        for j in range(0,len(X_torch)):
+            y = torch.sparse.mm(W_torch_gpu, X_torch_keynet_gpu[j])
+    print('pytorch sparse conv2d (gpu): %f ms' % (1000*sw.elapsed/len(X_torch_keynet_gpu)))
+
+    W_keynet_torch_gpu = W_keynet_torch.cuda(2)
+    X_torch_keynet_gpu = [x.cuda(2) for x in X_torch_keynet]    
+    with Stopwatch() as sw:
+        for j in range(0,len(X_torch)):
+            y = torch.sparse.mm(W_keynet_torch_gpu, X_torch_keynet_gpu[j])
+    print('pytorch sparse conv2d permuted (gpu): %f ms' % (1000*sw.elapsed/len(X_torch_keynet_gpu)))
