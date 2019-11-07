@@ -73,29 +73,29 @@ class AllConvNet(nn.Module):
 
 
 class StochasticKeyNet(AllConvNet):
-    def __init__(self, keys=None, n_input_channels=3, alpha=1, use_torch_sparse=False):
+    def __init__(self, keys=None, n_input_channels=3, alpha=1, use_torch_sparse=False, use_cupy_sparse=False):
         super(StochasticKeyNet, self).__init__()
 
-        self.conv1 = keynet.layers.KeyedConv2d(n_input_channels, 96, kernel_size=3, stride=1, use_torch_sparse=use_torch_sparse)  # assumed padding=1
-        self.relu1 = keynet.layers.KeyedRelu(use_torch_sparse=use_torch_sparse)
-        self.conv2 = keynet.layers.KeyedConv2d(96, 96, kernel_size=3, stride=1, use_torch_sparse=use_torch_sparse)  # assumed padding=1
+        self.conv1 = keynet.layers.KeyedConv2d(n_input_channels, 96, kernel_size=3, stride=1, use_torch_sparse=use_torch_sparse, use_cupy_sparse=use_cupy_sparse)  # assumed padding=1
+        self.relu1 = keynet.layers.KeyedRelu(use_torch_sparse=use_torch_sparse, use_cupy_sparse=use_cupy_sparse)
+        self.conv2 = keynet.layers.KeyedConv2d(96, 96, kernel_size=3, stride=1, use_torch_sparse=use_torch_sparse, use_cupy_sparse=use_cupy_sparse)  # assumed padding=1
         #self.relu2 = keynet.layers.KeyedRelu(use_torch_sparse=use_torch_sparse)
-        self.conv3 = keynet.layers.KeyedConv2d(96, 96, kernel_size=3, stride=2, use_torch_sparse=use_torch_sparse)  # assumed padding=1
-        self.relu3 = keynet.layers.KeyedRelu(use_torch_sparse=use_torch_sparse)
-        self.conv4 = keynet.layers.KeyedConv2d(96, 192, kernel_size=3, stride=1, use_torch_sparse=use_torch_sparse)  # assumed padding=1
-        self.relu4 = keynet.layers.KeyedRelu(use_torch_sparse=use_torch_sparse)
-        self.conv5 = keynet.layers.KeyedConv2d(192, 192, kernel_size=3, stride=1, use_torch_sparse=use_torch_sparse)  # assumed padding=1
+        self.conv3 = keynet.layers.KeyedConv2d(96, 96, kernel_size=3, stride=2, use_torch_sparse=use_torch_sparse, use_cupy_sparse=use_cupy_sparse)  # assumed padding=1
+        self.relu3 = keynet.layers.KeyedRelu(use_torch_sparse=use_torch_sparse, use_cupy_sparse=use_cupy_sparse)
+        self.conv4 = keynet.layers.KeyedConv2d(96, 192, kernel_size=3, stride=1, use_torch_sparse=use_torch_sparse, use_cupy_sparse=use_cupy_sparse)  # assumed padding=1
+        self.relu4 = keynet.layers.KeyedRelu(use_torch_sparse=use_torch_sparse, use_cupy_sparse=use_cupy_sparse)
+        self.conv5 = keynet.layers.KeyedConv2d(192, 192, kernel_size=3, stride=1, use_torch_sparse=use_torch_sparse, use_cupy_sparse=use_cupy_sparse)  # assumed padding=1
         #self.relu5 = keynet.layers.KeyedRelu(use_torch_sparse=use_torch_sparse)
-        self.conv6 = keynet.layers.KeyedConv2d(192, 192, kernel_size=3, stride=2, use_torch_sparse=use_torch_sparse)  # assumed padding=1
-        self.relu6 = keynet.layers.KeyedRelu(use_torch_sparse=use_torch_sparse)
-        self.conv7 = keynet.layers.KeyedConv2d(192, 192, kernel_size=3, stride=1, use_torch_sparse=use_torch_sparse)  # assumed padding=1
+        self.conv6 = keynet.layers.KeyedConv2d(192, 192, kernel_size=3, stride=2, use_torch_sparse=use_torch_sparse, use_cupy_sparse=use_cupy_sparse)  # assumed padding=1
+        self.relu6 = keynet.layers.KeyedRelu(use_torch_sparse=use_torch_sparse, use_cupy_sparse=use_cupy_sparse)
+        self.conv7 = keynet.layers.KeyedConv2d(192, 192, kernel_size=3, stride=1, use_torch_sparse=use_torch_sparse, use_cupy_sparse=use_cupy_sparse)  # assumed padding=1
         #self.relu7 = keynet.layers.KeyedRelu(use_torch_sparse=use_torch_sparse)
-        self.conv8 = keynet.layers.KeyedConv2d(192, 192, kernel_size=1, stride=1, use_torch_sparse=use_torch_sparse)  # assumed padding=0
+        self.conv8 = keynet.layers.KeyedConv2d(192, 192, kernel_size=1, stride=1, use_torch_sparse=use_torch_sparse, use_cupy_sparse=use_cupy_sparse)  # assumed padding=0
         #self.relu8 = keynet.layers.KeyedRelu(use_torch_sparse=use_torch_sparse)
-        self.conv9 = keynet.layers.KeyedConv2d(192, 10, kernel_size=1, stride=1, use_torch_sparse=use_torch_sparse)  # assumed padding=0
-        self.relu9 = keynet.layers.KeyedRelu(use_torch_sparse=use_torch_sparse)
+        self.conv9 = keynet.layers.KeyedConv2d(192, 10, kernel_size=1, stride=1, use_torch_sparse=use_torch_sparse, use_cupy_sparse=use_cupy_sparse)  # assumed padding=0
+        self.relu9 = keynet.layers.KeyedRelu(use_torch_sparse=use_torch_sparse, use_cupy_sparse=use_cupy_sparse)
         self.fc1 = keynet.layers.KeyedLinear(10*8*8, 100)  
-        self.relu10 = keynet.layers.KeyedRelu(use_torch_sparse=use_torch_sparse)
+        self.relu10 = keynet.layers.KeyedRelu(use_torch_sparse=use_torch_sparse, use_cupy_sparse=use_cupy_sparse)
         self.fc2 = keynet.layers.KeyedLinear(100, 10)  
 
         # Layer output shapes:  x1 = conv1(x0)

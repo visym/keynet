@@ -129,16 +129,18 @@ def affine_augmentation_matrix(W,bias=None):
     return W_affine
     
 
-def scipy_coo_to_torch_sparse(coo):
+def scipy_coo_to_torch_sparse(coo, device='cpu'):
     """https://stackoverflow.com/questions/50665141/converting-a-scipy-coo-matrix-to-pytorch-sparse-tensor"""
-    values = coo.data
-    indices = np.vstack((coo.row, coo.col))
 
-    i = torch.LongTensor(indices)
-    v = torch.FloatTensor(values)
-    shape = coo.shape
+    with torch.cuda.device(device):
+        values = coo.data
+        indices = np.vstack((coo.row, coo.col))
 
-    return torch.sparse.FloatTensor(i, v, torch.Size(shape))
+        i = torch.LongTensor(indices)
+        v = torch.FloatTensor(values)
+        shape = coo.shape
+
+        return torch.sparse.FloatTensor(i, v, torch.Size(shape))
     
 
 def fuse_conv2d_and_bn(conv2d_weight, conv2d_bias, bn_running_mean, bn_running_var, bn_eps, bn_weight, bn_bias):

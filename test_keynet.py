@@ -21,6 +21,8 @@ import keynet.cifar10
 import keynet.torch
 import keynet.fiberbundle
 from torch import nn
+import cupyx
+import cupy
 
 def example_2x2():
     """Reproduce figure 2 in paper"""
@@ -318,7 +320,7 @@ def test_keynet_cifar10():
     for alpha in [1,2,4]:
         A0 = sparse_permutation_matrix(3*32*32 + 1)
         A0inv = A0.transpose()
-        knet = StochasticKeyNet(alpha=alpha)
+        knet = StochasticKeyNet(alpha=alpha, use_cupy_sparse=False, use_torch_sparse=True)
         knet.eval()    
         knet.load_state_dict_keyed(torch.load('./models/cifar10_allconv.pth'), A0inv=A0inv)
         Xh = [knet.encrypt(A0, x) for x in X]
@@ -326,7 +328,7 @@ def test_keynet_cifar10():
             yh = [knet.decrypt(knet(xh)) for xh in Xh]
         with Stopwatch() as sw:
             yh = [knet.decrypt(knet(xh)) for xh in Xh]
-        print('Keyed-AllConvNet (alpha=%d) Elapsed: %f sec' % (alpha, sw.elapsed/len(X)))
+        print('Keyed-AllConvNet (alpha=%d) Elapsed: %f sec' % (alpha, sw.elapsed/len(Xh)))
 
         print(y[0], yh[0])
         assert (np.allclose(np.array(y[0]).flatten(), np.array(yh[0]).flatten(), atol=1E-1))
@@ -379,7 +381,7 @@ def test_semantic_security():
 
 
 def test_sparse_multiply():
-    (n_outchannel, n_inchannel, width, height, kernelsize) = (32,16,128,128,3)
+    (n_outchannel, n_inchannel, width, height, kernelsize) = (32,32,128,128,3)
     #(n_outchannel, n_inchannel, width, height, kernelsize) = (6,3,8,8,3)
 
     f = nn.Conv2d(n_inchannel, n_outchannel, kernelsize, padding=1)     
@@ -445,3 +447,11 @@ def test_sparse_multiply():
         for j in range(0,len(X_torch)):
             y = torch.sparse.mm(W_keynet_torch_gpu, X_torch_keynet_gpu[j])
     print('pytorch sparse conv2d permuted (gpu): %f ms' % (1000*sw.elapsed/len(X_torch_keynet_gpu)))
+    
+    with cupy.cuda.Device(3):
+        W_keynet_cupy = cupyx.scipy.sparse.csr_matrix(W_keynet.tocsr())
+        X_cupy_keynet_gpu = [cupy.array(x) for x in X_numpy_keynet]    
+        with Stopwatch() as sw:
+            for j in range(0,len(X_cupy_keynet_gpu)):
+                y = W_keynet_cupy.dot(X_cupy_keynet_gpu[j])
+        print('cupy sparse conv2d permuted (gpu): %f ms' % (1000*sw.elapsed/len(X_cupy_keynet_gpu)))
