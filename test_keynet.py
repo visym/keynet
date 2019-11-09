@@ -10,9 +10,9 @@ import vipy.image  # bash setup
 import vipy.visualize  # bash setup
 from vipy.util import Stopwatch
 from keynet.util import sparse_permutation_matrix, sparse_identity_matrix, sparse_generalized_permutation_block_matrix, sparse_generalized_stochastic_block_matrix
-from keynet.torch import affine_augmentation_tensor, affine_deaugmentation_tensor
+from keynet.torch import affine_augmentation_tensor, affine_deaugmentation_tensor, affine_deaugmentation
 from keynet.torch import sparse_toeplitz_conv2d, conv2d_in_scipy
-from keynet.torch import sparse_toeplitz_avgpool2d, avgpool2d_in_scipy
+from keynet.torch import sparse_toeplitz_avgpool2d, avgpool2d_in_scipy, conv2d_in_scipy
 from keynet.util import sparse_diagonal_matrix, sparse_inverse_diagonal_matrix, random_dense_positive_definite_matrix
 import keynet.util
 import keynet.blockpermute
@@ -320,7 +320,7 @@ def test_keynet_cifar10():
     for alpha in [1,2,4]:
         A0 = sparse_permutation_matrix(3*32*32 + 1)
         A0inv = A0.transpose()
-        knet = StochasticKeyNet(alpha=alpha, use_cupy_sparse=False, use_torch_sparse=True)
+        knet = StochasticKeyNet(alpha=alpha, use_cupy_sparse=False, use_torch_sparse=False)
         knet.eval()    
         knet.load_state_dict_keyed(torch.load('./models/cifar10_allconv.pth'), A0inv=A0inv)
         Xh = [knet.encrypt(A0, x) for x in X]
@@ -382,10 +382,12 @@ def test_semantic_security():
 
 def test_sparse_multiply():
     (n_outchannel, n_inchannel, width, height, kernelsize) = (32,32,128,128,3)
-    #(n_outchannel, n_inchannel, width, height, kernelsize) = (6,3,8,8,3)
+    #(n_outchannel, n_inchannel, width, height, kernelsize) = (6,4,8,8,3)  # Quicktest parameters
 
     f = nn.Conv2d(n_inchannel, n_outchannel, kernelsize, padding=1)     
-    W = sparse_toeplitz_conv2d( (n_inchannel,width,height), np.ones( (n_outchannel,n_inchannel,kernelsize,kernelsize) ))
+    f_numpy = lambda x: conv2d_in_scipy(x, f=f.weight.data.detach().numpy(), b=f.bias.data.detach().numpy(), stride=1)
+
+    W = sparse_toeplitz_conv2d( (n_inchannel,width,height), f.weight.data.detach().numpy(), bias=f.bias.data.detach().numpy())
     W_torch = keynet.torch.scipy_coo_to_torch_sparse(W)
     W = W.tocsr()
     (A,Ainv) = sparse_generalized_permutation_block_matrix(n_inchannel*width*height+1, 1) 
@@ -398,6 +400,11 @@ def test_sparse_multiply():
     X_torch_keynet = [affine_augmentation_tensor(x) for x in X_torch]
     X_numpy_keynet = [np.array(x) for x in X_torch_keynet]
 
+    # Sanity check
+    assert(np.allclose(f(X_torch[0]).detach().numpy(), f_numpy(X_numpy[0]), atol=1E-4))
+    assert(np.allclose(f_numpy(X_numpy[0]).flatten(), affine_deaugmentation(W.dot(X_numpy_keynet[0])), atol=1E-4))
+
+    # Timing
     with Stopwatch() as sw:
         y = [f(x) for x in X_torch]
     print('pytorch conv2d (cpu): %f ms' % (1000*sw.elapsed/len(X_torch)))
@@ -410,6 +417,9 @@ def test_sparse_multiply():
         y = [torch.sparse.mm(W_keynet_torch, x) for x in X_torch_keynet]
     print('pytorch sparse conv2d permuted (cpu): %f ms' % (1000*sw.elapsed/len(X_torch_keynet)))
 
+    with Stopwatch() as sw:
+        y = [f_numpy(x) for x in X_numpy]
+    print('numpy conv2d (cpu): %f ms' % (1000*sw.elapsed/len(X_numpy)))
 
     with Stopwatch() as sw:
         y = [W.dot(x) for x in X_numpy_keynet]

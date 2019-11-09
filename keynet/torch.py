@@ -19,19 +19,19 @@ def count_keynet_parameters(model):
     except:
         return np.sum([getattr(model, layername).What.nnz if hasattr(getattr(model, layername).What, 'nnz') else getattr(model, layername).What.size for layername in dir(model) if hasattr(getattr(model, layername), 'What') and getattr(model, layername).What is not None])
 
-def conv2d_in_scipy(x,f,b,stride=1):
+def conv2d_in_scipy(x,f,b=None,stride=1):
     """Torch equivalent conv2d operation in scipy, with input tensor x, filter weight f and bias b"""
     """x=[BATCH,INCHANNEL,HEIGHT,WIDTH], f=[OUTCHANNEL,INCHANNEL,HEIGHT,WIDTH], b=[OUTCHANNEL,1]"""
 
     assert(len(x.shape) == 4 and len(f.shape) == 4)
     assert(f.shape[1] == x.shape[1])  # equal inchannels
-    assert(f.shape[2]==f.shape[3] and f.shape[1]%2 == 1)  # filter is square, odd
+    assert(f.shape[2]==f.shape[3] and f.shape[2]%2 == 1)  # filter is square, odd
     assert(b.shape[0] == f.shape[0])  # weights and bias dimensionality match
 
     (N,C,U,V) = (x.shape)
     (M,K,P,Q) = (f.shape)
     x_spatialpad = np.pad(x, ( (0,0), (0,0), ((P-1)//2, (P-1)//2), ((Q-1)//2, (Q-1)//2)), mode='constant', constant_values=0)
-    y = np.array([scipy.signal.correlate(x_spatialpad[n,:,:,:], f[m,:,:,:], mode='valid')[:,::stride,::stride] + b[m] for n in range(0,N) for m in range(0,M)])
+    y = np.array([scipy.signal.correlate(x_spatialpad[n,:,:,:], f[m,:,:,:], mode='valid')[:,::stride,::stride] + (b[m] if b is not None else 0) for n in range(0,N) for m in range(0,M)])
     return np.reshape(y, (N,M,U//stride,V//stride) )
 
 
@@ -109,6 +109,12 @@ def sparse_toeplitz_avgpool2d(inshape, filtershape, stride):
     return sparse_toeplitz_conv2d(inshape, F, bias=None, stride=stride)
     
 
+def affine_augmentation(x):
+    return affine_augmentation_tensor(torch.as_tensor(x)).detach().numpy()
+
+def affine_deaugmentation(x):
+    return affine_deaugmentation_tensor(torch.as_tensor(x)).detach().numpy()
+
 def affine_augmentation_tensor(x):
     if len(x.shape) == 4:
         (N,C,U,V) = x.shape
@@ -132,15 +138,18 @@ def affine_augmentation_matrix(W,bias=None):
 def scipy_coo_to_torch_sparse(coo, device='cpu'):
     """https://stackoverflow.com/questions/50665141/converting-a-scipy-coo-matrix-to-pytorch-sparse-tensor"""
 
-    with torch.cuda.device(device):
-        values = coo.data
-        indices = np.vstack((coo.row, coo.col))
+    values = coo.data
+    indices = np.vstack((coo.row, coo.col))
+    
+    i = torch.LongTensor(indices)
+    v = torch.FloatTensor(values)
+    shape = coo.shape
 
-        i = torch.LongTensor(indices)
-        v = torch.FloatTensor(values)
-        shape = coo.shape
-
+    if device == 'cpu':
         return torch.sparse.FloatTensor(i, v, torch.Size(shape))
+    else:
+        with torch.cuda.device(device):
+            return torch.sparse.FloatTensor(i, v, torch.Size(shape)).cuda(device)
     
 
 def fuse_conv2d_and_bn(conv2d_weight, conv2d_bias, bn_running_mean, bn_running_var, bn_eps, bn_weight, bn_bias):

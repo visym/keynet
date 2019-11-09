@@ -34,7 +34,6 @@ class KeyedConv2d(nn.Module):
         elif self.use_cupy_sparse:
             self.What = cupyx.scipy.sparse.csr_matrix(self.What.tocsr())
 
-
     def forward(self, x_affine):
         """x_affine=(C*U*V+1 x N)"""
         if self.use_torch_sparse:
