@@ -14,6 +14,7 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 def count_keynet_parameters(model):
+    """Hacky method to count total number of key-net sparse parameters"""
     try:
         return np.sum([getattr(model, layername).What.nnz if hasattr(getattr(model, layername).What, 'nnz') else getattr(model, layername).What.numel() for layername in dir(model) if hasattr(getattr(model, layername), 'What') and getattr(model, layername).What is not None])
     except:
@@ -36,8 +37,8 @@ def conv2d_in_scipy(x,f,b=None,stride=1):
 
 
 def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1):
-    # Returns sparse toeplitz matrix (W) in coo format that is equivalent to per-channel pytorch conv2d (spatial correlation)
-    # see also: test_keynet.test_sparse_toeplitz_conv2d()
+    """ Returns sparse toeplitz matrix (W) in coo format that is equivalent to per-channel pytorch conv2d (spatial correlation)
+    see also: test_keynet.test_sparse_toeplitz_conv2d()"""
 
     # Valid shapes
     assert(len(inshape) == 3 and len(f.shape) == 4)  # 3D tensor inshape=(inchannels, height, width), f.shape=(outchannels, kernelheight, kernelwidth, inchannels)

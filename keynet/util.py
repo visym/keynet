@@ -7,7 +7,7 @@ import PIL
 import uuid
 import tempfile
 import os
-
+import time
 
 
 def sparse_block_diag(mats, format='coo', dtype=None):
@@ -189,6 +189,33 @@ def sparse_generalized_permutation_block_matrix(n, m, dtype=np.float32):
 
     return(A.astype(dtype), Ainv.astype(dtype))
 
+
+class Stopwatch(object):
+    """Return elapsed system time in seconds between calls to enter and exit"""
+    """Copied from vipy.util.Stopwatch"""
+    def __init__(self):
+        self.reset()
+
+    def __enter__(self):
+        self.start = time.time()
+        self.last = self.start
+        return self
+
+    def __exit__(self, *args):
+        self.end = time.time()
+        self.elapsed = self.end - self.start
+
+    def since(self, start=False):
+        """Return seconds since start or last call to this method"""
+        now = time.time()
+        dur = now - self.start if start is True else now - self.last
+        self.last = now
+        return dur
+
+    def reset(self):
+        self.start = time.time()
+        self.last = self.start
+        return self
 
 
 

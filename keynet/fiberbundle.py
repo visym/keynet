@@ -157,6 +157,7 @@ def simulation(img_color, fiber_core_x=16, fiber_core_y=16, clad_factor=1.25, sh
 
 
 def transform(img_color, outshape=(32,32)):
+    """Generate a simulated fiber bundle image"""
     assert(len(np.array(img_color).shape) == 3 and np.array(img_color).dtype == np.uint8)
     img_color_large = np.array(PIL.Image.fromarray(np.array(img_color)).resize( (512,512), PIL.Image.NEAREST ))  # nearest neighbor upsample
     img_sim_large = simulation(img_color_large, h_xtalk=0.05, v_xtalk=0.05, fiber_core_x=16, fiber_core_y=16, do_camera_noise=False)

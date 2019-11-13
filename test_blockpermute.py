@@ -12,8 +12,6 @@ import scipy.signal
 import scipy.ndimage
 import torch.nn.functional as F
 import torch 
-import vipy.image  # bash setup
-import vipy.visualize  # bash setup
 from keynet.blockpermute import block_permutation_mask, block_permute, local_permutation_mask, global_permutation_mask
 from keynet.util import savetemp, imshow
 

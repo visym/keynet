@@ -9,7 +9,7 @@ import keynet.layers
 from keynet.util import sparse_permutation_matrix, sparse_identity_matrix, sparse_uniform_random_diagonal_matrix, sparse_inverse_diagonal_matrix
 from keynet.util import sparse_generalized_stochastic_block_matrix, sparse_generalized_permutation_block_matrix, sparse_stochastic_matrix
 from keynet.torch import affine_augmentation_tensor, affine_deaugmentation_tensor
-import vipy.util
+from keynet.util import Stopwatch
 import keynet.cifar10
 
 
@@ -340,7 +340,7 @@ def validate(net, mnistdir='/proj/enigma', secretkey=None, transform=LeNet().tra
     valloader = torch.utils.data.DataLoader(valset, batch_size=64, shuffle=True)
     net.eval()
 
-    with vipy.util.Stopwatch() as sw:
+    with Stopwatch() as sw:
         (total, correct) = (0,0)
         for images,labels in valloader:
             for i in range(len(labels)):
@@ -354,15 +354,18 @@ def validate(net, mnistdir='/proj/enigma', secretkey=None, transform=LeNet().tra
     print('Validation: %s sec' % sw.elapsed)
 
 def lenet():
+    """Reproduce results in figure 6, 'raw' column"""
     net = train(LeNet(), modelfile='./models/mnist_lenet.pth', lr=0.003, epochs=20)
     validate(net)
 
 
 def lenet_avgpool():
+    """Reproduce results in figure 6, 'raw' column"""
     net = train(LeNet_AvgPool(), modelfile='./models/mnist_lenet_avgpool.pth', lr=0.003, epochs=40)
     validate(net)
 
 def allconvnet():
+    """Reproduce results in figure 6, 'raw' column"""
     transform = transforms.Compose([transforms.Grayscale(),
                                     transforms.Resize( (32,32) ),
                                     transforms.ToTensor(),        
@@ -373,6 +376,7 @@ def allconvnet():
 
 
 def lenet_avgpool_fiberbundle(do_mean_estimation=True, mnistdir='/proj/enigma'):
+    """Reproduce results in figure 6, 'sim' column"""
     # Mean
     if do_mean_estimation:
         transform = transforms.Compose([transforms.Lambda(lambda img: keynet.fiberbundle.transform(img.convert('RGB'), (28,28))),
@@ -421,6 +425,7 @@ def lenet_avgpool_fiberbundle(do_mean_estimation=True, mnistdir='/proj/enigma'):
 
 
 def allconv_fiberbundle(do_mean_estimation=True, mnistdir='/proj/enigma'):
+    """Reproduce results in figure 6, 'sim' column"""
     # Mean
     if do_mean_estimation:
         transform = transforms.Compose([transforms.Lambda(lambda img: keynet.fiberbundle.transform(img.convert('RGB'), (32,32))),
@@ -466,6 +471,7 @@ def allconv_fiberbundle(do_mean_estimation=True, mnistdir='/proj/enigma'):
 
 
 def keynet_alpha1():
+    """Reproduce results in figure 6"""
     net = PermutationKeyNet()
     A0 = sparse_permutation_matrix(28*28*1 + 1)
     A0inv = A0.transpose()
@@ -474,6 +480,7 @@ def keynet_alpha1():
 
 
 def keynet_alpha1_allconv():
+    """Reproduce results in figure 6"""
     net = keynet.cifar10.StochasticKeyNet(n_input_channels=1)
     A0 = sparse_permutation_matrix(32*32*1 + 1)
     A0inv = A0.transpose()

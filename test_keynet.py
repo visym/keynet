@@ -6,9 +6,8 @@ from PIL import Image
 import copy
 import torch.nn.functional as F
 import torch 
-import vipy.image  # bash setup
-import vipy.visualize  # bash setup
-from vipy.util import Stopwatch
+from torch import nn
+from keynet.util import Stopwatch
 from keynet.util import sparse_permutation_matrix, sparse_identity_matrix, sparse_generalized_permutation_block_matrix, sparse_generalized_stochastic_block_matrix
 from keynet.torch import affine_augmentation_tensor, affine_deaugmentation_tensor, affine_deaugmentation
 from keynet.torch import sparse_toeplitz_conv2d, conv2d_in_scipy
@@ -20,12 +19,12 @@ import keynet.mnist
 import keynet.cifar10
 import keynet.torch
 import keynet.fiberbundle
-from torch import nn
 import cupyx
 import cupy
 
+
 def example_2x2():
-    """Reproduce figure 2 in paper"""
+    """Reproduce figure 8 in paper"""
     np.random.seed(0)
 
     img = np.array([[11,12],[21,22]]).astype(np.float32)
@@ -86,8 +85,13 @@ def example_2x2():
     print(multi_dot( (A2inv, x2h) ))
 
 
-
 def optical_transformation_montage():
+    """Reproduce figure 3"""
+
+    # FIXME: Montage dependendencies, need to update in pypy
+    import vipy.image
+    import vipy.visualize
+
     (m,n) = (256,256)
     img = np.array(PIL.Image.open('owl.jpg').resize( (256,256) ))
 
@@ -185,6 +189,7 @@ def test_sparse_toeplitz_avgpool2d():
 
 
 def test_keynet_mnist():
+    """Reproduce results for figure 6"""
     torch.set_grad_enabled(False)
     np.random.seed(0)
     X = [torch.tensor(np.random.rand(1,1,28,28).astype(np.float32)) for j in range(0,16)]
@@ -299,6 +304,7 @@ def test_keynet_mnist():
 
     
 def test_keynet_cifar10():
+    """Reproduce results for figure 6"""
     from keynet.cifar10 import AllConvNet, StochasticKeyNet
 
     torch.set_grad_enabled(False)
@@ -339,6 +345,7 @@ def test_keynet_cifar10():
 
 
 def test_roundoff(m=512, n=1000):
+    """Experiment with accumulated float32 rounding errors for deeper networks"""
     x = np.random.randn(m,1).astype(np.float32)
     xh = x
     for j in range(0,n):
@@ -351,20 +358,22 @@ def test_roundoff(m=512, n=1000):
 
 
 def test_fiberbundle_simulation():
+    """Save a temp image containing the fiber bundle simulation for the image 'owl.jpg'"""
     img_color = np.array(PIL.Image.open('owl.jpg').resize( (512,512) ))
     img_sim = keynet.fiberbundle.simulation(img_color, h_xtalk=0.05, v_xtalk=0.05, fiber_core_x=16, fiber_core_y=16, do_camera_noise=True)
-    keynet.util.savetemp(np.uint8(img_sim))
+    return keynet.util.savetemp(np.uint8(img_sim))
 
 
 def test_fiberbundle_simulation_32x32():
+    """Save a 32x32 CIFAR-10 like temp image containing the fiber bundle simulation for the image 'owl.jpg'"""
     img_color_large = np.array(PIL.Image.open('owl.jpg').resize( (512,512), PIL.Image.BICUBIC ))  
     img_sim_large = keynet.fiberbundle.simulation(img_color_large, h_xtalk=0.05, v_xtalk=0.05, fiber_core_x=16, fiber_core_y=16, do_camera_noise=False)
     img_sim = np.array(PIL.Image.fromarray(np.uint8(img_sim_large)).resize( (32,32), PIL.Image.BICUBIC ).resize( (512,512), PIL.Image.NEAREST ))
-    #keynet.util.savetemp(np.uint8(img_color_large))
-    keynet.util.savetemp(np.uint8(img_sim))
+    return keynet.util.savetemp(np.uint8(img_sim))
 
     
 def test_semantic_security():
+    """Confirm that number of non-zeros is increased in Toeplitz matrix after keying"""
     W = sparse_toeplitz_conv2d( (1,8,8), np.ones( (1,1,3,3) ))
     (B,Binv) = sparse_generalized_stochastic_block_matrix(65,1)
     (A,Ainv) = sparse_generalized_permutation_block_matrix(65,2)
@@ -376,11 +385,11 @@ def test_semantic_security():
     assert(What.nnz > W.nnz)
 
     print('test_semantic_security: passed')
-    # FIXME: A,Ainv are negative in general for permutation, Ainv is nevative for stochastic
-    # If Ainv is nevative, then AWAinv -> A(WAinv_+ - WAinv_-) and same as before to recover A, which can be used to recover W and Ainv
 
 
 def test_sparse_multiply():
+    """Reproduce results for figure 7"""
+
     (n_outchannel, n_inchannel, width, height, kernelsize) = (32,32,128,128,3)
     #(n_outchannel, n_inchannel, width, height, kernelsize) = (6,4,8,8,3)  # Quicktest parameters
 

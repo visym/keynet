@@ -52,9 +52,10 @@ class AllConvNet(nn.Module):
         conv8_out = F.relu(self.conv8(conv7_out))            # (192,8,8) -> (192,8,8)
         conv9_out = F.relu(self.conv9(conv8_out))            # (192,8,8) -> (10,8,8)
         x = conv9_out.view(-1, 10*8*8)                       # (10,8,8) -> (10*8*8,1)
-        x = F.relu(self.fc1(x))                              # This is not exactly an all-conv...
-        x = self.fc2(x)                                      # This is not exactly an all-conv...
+        x = F.relu(self.fc1(x))                              # This is not exactly an all-conv, but still in the spirit...
+        x = self.fc2(x)                                      # This is not exactly an all-conv, but still in the spirit...
         return x
+
 
     @staticmethod
     def transform_train():
@@ -274,12 +275,14 @@ def train(net, modelfile, cifardir='/proj/enigma', epochs=350, lr=0.01, transfor
 
 
 def allconv():
+    """Reproduce results in figure 6"""
     train(AllConvNet(), modelfile='./models/cifar10_allconv.pth', lr=0.01, epochs=350)
     testmodel = AllConvNet()
     testmodel.load_state_dict(torch.load('./models/cifar10_allconv.pth'))
     validate(testmodel)
 
 def lenet():
+    """Reproduce results in figure 6"""
     net = keynet.mnist.LeNet()
     train(net, modelfile='./models/cifar10_lenet.pth', lr=0.01, epochs=350, transform=net.transform_cifar10_train())
     testnet = keynet.mnist.LeNet()
@@ -287,6 +290,7 @@ def lenet():
     validate(testnet, transform=testnet.transform_cifar10_test())
 
 def lenet_avgpool():
+    """Reproduce results in figure 6"""
     net = keynet.mnist.LeNet_AvgPool()
     train(net, modelfile='./models/cifar10_lenet_avgpool.pth', lr=0.01, epochs=350, transform=net.transform_cifar10_train())
     testnet = keynet.mnist.LeNet_AvgPool()
@@ -294,7 +298,7 @@ def lenet_avgpool():
     validate(testnet, transform=testnet.transform_cifar10_test())
 
 def lenet_avgpool_fiberbundle(do_mean_estimation=True, cifardir='/proj/enigma'):
-    # Mean
+    """Reproduce results in figure 6, 'sim' column"""
     if do_mean_estimation:
         transform = transforms.Compose([transforms.Lambda(lambda img: keynet.fiberbundle.transform(img, (28,28))),
                                         transforms.Grayscale(),
@@ -342,7 +346,7 @@ def lenet_avgpool_fiberbundle(do_mean_estimation=True, cifardir='/proj/enigma'):
 
 
 def allconv_fiberbundle(do_mean_estimation=True, cifardir='/proj/enigma'):
-    # Mean
+    """Reproduce results in figure 6, 'sim' column"""
     if do_mean_estimation:
         transform = transforms.Compose([transforms.Lambda(lambda img: keynet.fiberbundle.transform(img, (32,32))),
                                         transforms.ToTensor()])
@@ -388,6 +392,7 @@ def allconv_fiberbundle(do_mean_estimation=True, cifardir='/proj/enigma'):
 
 
 def keynet_alpha1():
+    """Reproduce results in figure 6"""
     A0 = sparse_permutation_matrix(32*32*3 + 1)
     A0inv = A0.transpose()
     net = keynet.cifar10.StochasticKeyNet()
@@ -395,6 +400,7 @@ def keynet_alpha1():
     validate(net, secretkey=A0)
 
 def keynet_alpha1_lenet_avgpool():
+    """Reproduce results in figure 6"""
     A0 = sparse_permutation_matrix(28*28*1 + 1)
     A0inv = A0.transpose()
     net = keynet.mnist.StochasticKeyNet()
