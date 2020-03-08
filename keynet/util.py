@@ -114,6 +114,13 @@ def sparse_permutation_matrix(n, dtype=np.float32):
     col_ind = np.random.permutation(list(range(0,n)))
     return csr_matrix((data, (row_ind, col_ind)), shape=(n,n))
 
+def sparse_permutation_matrix_with_inverse(n, dtype=np.float32):
+    data = np.ones(n).astype(dtype)
+    row_ind = list(range(0,n))
+    col_ind = np.random.permutation(list(range(0,n)))
+    P = csr_matrix((data, (row_ind, col_ind)), shape=(n,n))
+    return (P, P.transpose())
+
 def sparse_identity_matrix(n, dtype=np.float32):
     return scipy.sparse.eye(n, dtype=dtype)
 

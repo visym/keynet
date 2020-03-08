@@ -9,6 +9,8 @@ import uuid
 import tempfile
 import os
 from torch import nn
+from collections import OrderedDict
+
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -24,7 +26,7 @@ def count_keynet_parameters(model):
 
 def netshape(net, inshape):
     """Pass a dummy input into the network and retrieve the input and output shapes of all layers.  Requires named modules, and inplace layers might screw this up"""
-    d_modulename_to_shape = {}
+    d_modulename_to_shape = OrderedDict()
     x_dummy = torch.rand(1,inshape[0], inshape[1], inshape[2])
     net.eval()
     
@@ -42,10 +44,15 @@ def netshape(net, inshape):
         return hooklist
 
     def _get_shape(m, input, output):
-        d_modulename_to_shape[m.__name] = {'inshape':tuple(list(input[0].shape)[1:]), 'outshape':tuple(list(output.shape)[1:])}
         if 'input' not in d_modulename_to_shape:
             d_modulename_to_shape['input'] = m.__name  # first
-        d_modulename_to_shape['output'] = m.__name  # last
+        if 'output' in d_modulename_to_shape:
+            del d_modulename_to_shape['output']         # delete and            
+        prevlayer = [k for k in d_modulename_to_shape][-1]
+        d_modulename_to_shape[m.__name] = {'inshape':tuple(list(input[0].shape)[1:]),
+                                           'outshape':tuple(list(output.shape)[1:]),
+                                           'prevlayer':prevlayer}
+        d_modulename_to_shape['output'] = m.__name  # reinsert for last        
         delattr(m, '__name')
 
     hooks = _layer_visitor(_get_shape, net)

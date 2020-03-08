@@ -6,7 +6,7 @@ import copy
 import torch 
 from torch import nn
 import torch.nn.functional as F
-from keynet.util import sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse
+from keynet.util import sparse_permutation_matrix_with_inverse, sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse
 from keynet.util import sparse_generalized_stochastic_block_matrix_with_inverse, sparse_identity_matrix
 from keynet.torch import homogenize, dehomogenize, homogenize_matrix
 from keynet.torch import sparse_toeplitz_conv2d
@@ -22,7 +22,7 @@ import keynet.fiberbundle
 import keynet.block
 import vipy
 from vipy.util import Stopwatch
-from keynet.layers import PermutationKeynet, IdentityKeynet, KeyedSensor
+from keynet.layers import PermutationKeynet, IdentityKeynet, KeyedSensor, IdentityKeyedSensor, PermutationKeyedSensor
 
 
 def test_torch_homogenize():
@@ -239,28 +239,30 @@ def _test_semantic_security():
 
 
 def test_keynet_constructor():
+
+    inshape = (1,28,28)
+    x = torch.randn(1, *inshape)
     net = keynet.mnist.LeNet_AvgPool()
     net.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'));
-    net.eval()
-    (sensorkey, inkey) = (sparse_identity_matrix(28*28+1), sparse_identity_matrix(28*28+1))    
-    knet = IdentityKeynet(net, (1,28,28), inkey)
-    sensor = KeyedSensor( (1,28,28), sensorkey, inkey)
-    
-    x = torch.randn(1,1,28,28)
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten())
-    print('[test_keynet_constructor]:  MNIST PASSED')
+    sensor = IdentityKeyedSensor(inshape)
+    knet = IdentityKeynet(net, inshape, inkey=sensor.key())
+    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    print('[test_keynet_constructor]:  IdentityKeynet PASSED')
 
-    (sensorkey, inkey) = (sparse_identity_matrix(32*32*3+1), sparse_identity_matrix(32*32*3+1))        
-    sensor = KeyedSensor( (3,32,32), sensorkey, inkey)
+    sensor = PermutationKeyedSensor(inshape)    
+    knet = PermutationKeynet(net, inshape, inkey=sensor.key(), do_output_encryption=False)
+    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    print('[test_keynet_constructor]:  PermutationKeynet PASSED')    
+
+    inshape = (3,32,32)
+    sensor = IdentityKeyedSensor(inshape)
     net = keynet.cifar10.AllConvNet()
     net.load_state_dict(torch.load('./models/cifar10_allconv.pth', map_location=torch.device('cpu')));
-    net.eval()
-    x = torch.randn(1,3,32,32)
-    knet = IdentityKeynet(net, (3,32,32), inkey)
+    x = torch.randn(1, *inshape)
+    knet = IdentityKeynet(net, inshape, inkey=sensor.key())
     yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
-    assert np.allclose(yh, y)
-    
+    assert np.allclose(yh, y, atol=1E-5)    
     print('[test_keynet_constructor]:  PASSED')    
     
     

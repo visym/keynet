@@ -1,7 +1,7 @@
 from torch import nn
 from numpy.linalg import multi_dot 
 from keynet.torch import homogenize_matrix, sparse_toeplitz_conv2d, sparse_toeplitz_avgpool2d, scipy_coo_to_torch_sparse
-from keynet.util import sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse, sparse_identity_matrix
+from keynet.util import sparse_permutation_matrix_with_inverse, sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse, sparse_identity_matrix
 import torch
 import numpy as np
 import scipy.sparse
@@ -27,7 +27,7 @@ except:
 class KeyedLayer(nn.Module):
     def __init__(self, backend, W=None):
         super(KeyedLayer, self).__init__()        
-        assert backend in set(['torch', 'cupy', 'scipy', 'tiled']), "Unknown backend='%s' - Must be in ['torch', 'cupy', 'scipy', 'tiled']"
+        assert backend in set(['torch', 'cupy', 'scipy', 'tiled']), "Unknown backend='%s' - Must be in ['torch', 'cupy', 'scipy', 'tiled']" % backend
         self.backend = backend
         self.W = W        
 
@@ -47,11 +47,13 @@ class KeyedLayer(nn.Module):
             try_import(package='cupy', pipname='cupy, cupyx')
             return from_dlpack(self.W.dot(cupy.fromDlpack(to_dlpack(x_affine))).toDlpack())
         elif self.backend == 'scipy':
-            return torch.as_tensor(self.W.dot(x_affine.detach().numpy().transpose())).t()  # right multiply 
+            # Right multiply:  assumes that x_affine is transposed for left multiply, W is right multiply
+            return torch.as_tensor(self.W.dot(x_affine.detach().numpy().transpose())).t()    
         elif self.backend == 'tiled':
             raise
         else:
             raise
+
         
 class KeyedConv2d(KeyedLayer):
     def __init__(self, in_channels, out_channels, kernel_size, stride, backend='torch_sparse'):
@@ -64,6 +66,9 @@ class KeyedConv2d(KeyedLayer):
         self.kernel_size = kernel_size[0] if len(kernel_size) == 2 else kernel_size        
         self.in_channels = in_channels
         self.out_channels = out_channels
+
+    def extra_repr(self):
+        return str('<KeyedConv2d: W=%s, in_channels=%d, out_channels=%d, kernel_size=%s, stride=%s, backend=%s>' (str(self.W.shape), self.in_channels, self.out_channels, str(self.kernel_size), str(self.stride), str(self.backend)))
         
     def key(self, w, b, A, Ainv, inshape):
         """Assign key to conv2d
@@ -110,13 +115,15 @@ class KeyedConv2d(KeyedLayer):
         return self
     
 
-
 class KeyedLinear(KeyedLayer):
     def __init__(self, in_features, out_features, backend='scipy'):
         super(KeyedLinear, self).__init__(backend=backend)
         self.in_features = in_features
         self.out_features = out_features
 
+    def extra_repr(self):
+        return str('<KeyedLinear: W=%s, in_features=%d, out_features=%d, backend=%s>' (str(self.W.shape), self.in_features, self.out_features, str(self.backend)))
+        
     def key(self, w, b, A, Ainv):
         assert w.shape[0] == self.out_features and w.shape[1] == self.in_features, "Invalid input"
         assert self.backend == 'tiled' or ((A is None or scipy.sparse.issparse(A)) and scipy.sparse.issparse(Ainv)), "(A,Ainv) must be scipy.sparse matrices"        
@@ -130,8 +137,8 @@ class KeyedLinear(KeyedLayer):
         elif self.backend == 'cupy':
             pass
         elif self.backend == 'scipy':
-            self.W = homogenize_matrix(w, b)  # left multiply
-            self.W = Ainv.dot(self.W.detach().numpy()).transpose()  # right multiply 
+            self.W = homogenize_matrix(w, b)  # left multiply, t() for right multiply
+            self.W = Ainv.transpose().dot(self.W.detach().numpy()).transpose()   # right multiply for scipy. yuck
             if A is not None:
                 self.W = A.dot(self.W)   # right multiply
         elif self.backend == 'tiled':
@@ -146,14 +153,16 @@ class KeyedReLU(KeyedLayer):
     def __init__(self, backend='scipy'):
         super(KeyedReLU, self).__init__(backend=backend)
 
+    def extra_repr(self):
+        return str('<KeyedReLU: W=%s, backend=%s>' (str(self.W.shape), str(self.backend)))
+        
     def key(self, B, Ainv):
-        self.W = B*Ainv  # matrix multiply
         if self.backend == 'torch':            
             self.W = scipy_coo_to_torch_sparse(self.W.tocoo(), device='cuda')
         elif self.backend == 'cupy':
             self.W = cupyx.scipy.sparse.csr_matrix(self.What.tocsr())
         elif self.backend == 'scipy':
-            pass
+            self.W = B.dot(Ainv)  # right multiply            
         elif self.backend == 'tiled':
             raise
         return self
@@ -167,11 +176,14 @@ class KeyedAvgpool2d(KeyedLayer):
         super(KeyedAvgpool2d, self).__init__(backend=backend)
         self.kernel_size = kernel_size
         self.stride = stride
-        
+
+    def extra_repr(self):
+        return str('<KeyedAvgpool2d: W=%s, kernel_size=%s, stride=%s, backend=%s>' (str(self.W.shape), str(self.kernel_size), str(self.stride), str(self.backend)))
+    
     def key(self, A, Ainv, inshape):
         self.W = sparse_toeplitz_avgpool2d(inshape, (inshape[0], inshape[0], self.kernel_size, self.kernel_size), self.stride).transpose()  # transpose for left multiply
         if self.backend == 'torch':
-            self.W = scipy_coo_to_torch_sparse(self.W.tocoo(), device='cuda')
+            self.W = scipy_coo_to_torch_sparse(self.W.tocoo(), device='cuda')  # right multiply
             A = scipy_coo_to_torch_sparse(A.tocoo(), device='cuda')
             Ainv = scipy_coo_to_torch_sparse(Ainv.tocoo(), device='cuda')            
             self.W = Ainv.t().dot(self.W.dot(A.t()))  # transpose for left multiply                    
@@ -191,7 +203,7 @@ class KeyedSensor(KeyedLayer):
         self._tensor = None
 
     def __repr__(self):
-        return str('<keynet.sensor: height=%d, width=%d, channels=%d>' % (self._inshape[1], self._inshape[2], self._inshape[0]))
+        return str('<KeyedSensor: height=%d, width=%d, channels=%d>' % (self._inshape[1], self._inshape[2], self._inshape[0]))
     
     def load(self, imgfile):
         im = vipy.image.Image(imgfile).resize(self._inshape[1], self._inshape[2])
@@ -215,6 +227,12 @@ class KeyedSensor(KeyedLayer):
         colorspace = 'lum' if img.dtype == np.uint8 and img.shape[2] == 1 else colorspace
         return vipy.image.Image(array=img, colorspace=colorspace)
 
+    def keypair(self):
+        return (self._encryptkey, self._decryptkey)
+
+    def key(self):
+        return self._decryptkey
+    
     def isencrypted(self):
         return self.isloaded() and self._tensor.ndim == 2
 
@@ -238,16 +256,29 @@ class KeyedSensor(KeyedLayer):
         return self
 
 
-class KeyNet(object):
-    def __init__(self, net, inshape, layerkey, backend='scipy'):
-        # Get network layer shape
-        net.eval()
-        netshape = keynet.torch.netshape(net, inshape)
+class IdentityKeyedSensor(KeyedSensor):
+    def __init__(self, inshape, backend='scipy'):
+        (encryptkey, decryptkey) = (sparse_identity_matrix(np.prod(inshape)+1), sparse_identity_matrix(np.prod(inshape)+1))        
+        super(IdentityKeyedSensor, self).__init__(inshape, encryptkey, decryptkey, backend)
+
         
+class PermutationKeyedSensor(KeyedSensor):
+    def __init__(self, inshape, backend='scipy'):
+        (encryptkey, decryptkey) = sparse_permutation_matrix_with_inverse(np.prod(inshape)+1)        
+        super(PermutationKeyedSensor, self).__init__(inshape, encryptkey, decryptkey, backend)
+        
+
+class KeyNet(object):
+    def __init__(self, net, inshape, layerkey, backend='scipy', verbose=True):
+        # Get network layer shape
+        net.eval()        
+        netshape = keynet.torch.netshape(net, inshape)
+
         # Iterate over named layers and replace with keyed versions
         d_name_to_keyedmodule = OrderedDict()        
         for (k,m) in net.named_children():
-            print('[keynet.layers.KeyNet]: Keying "%s"' % k)
+            if verbose:
+                print('[keynet.layers.KeyNet]: Keying "%s"' % k)
             assert k in layerkey, 'Key not found for layer "%s"' % k
             assert k in netshape, 'Layer name not found in net shape for layer "%s"' % k
             assert 'A' in layerkey[k] and 'Ainv' in layerkey[k], 'Keys not specified for layer "%s"' % k
@@ -291,18 +322,36 @@ class KeyNet(object):
                 raise ValueError('unsupported layer type "%s"' % str(type(m)))
 
         self._keynet = nn.Sequential(d_name_to_keyedmodule)
-
+        self._embeddingkey = layerkey['output']
+        self._imagekey = layerkey['input']
+        self._backend = backend
+        
     def forward(self, img_cipher, outkey=None):
+        outkey = outkey if outkey is not None else self.embeddingkey()
         y_cipher = self._keynet.forward(img_cipher)
         return dehomogenize(self.decrypt(y_cipher, outkey) if outkey is not None else y_cipher)
     
-    def decrypt(self, y_cipher, key):
-        return KeyedLayer(backend=self.backend, W=key).forward(y_cipher)
+    def decrypt(self, y_cipher, outkey=None): 
+        outkey = outkey if outkey is not None else self.embeddingkey()
+        return KeyedLayer(backend=self._backend, W=outkey).forward(y_cipher) if outkey is not None else y_cipher
 
+    def imagekey(self):
+        """Return key for decryption of image (if desired)"""
+        return self._imagekey
 
+    def embeddingkey(self):
+        """Return key for decryption of output embedding layer"""
+        return self._embeddingkey
+    
+    def public(self):
+        """When publicly releasing the keynet, remove keys (if present)"""
+        self._imagekey = None
+        self._embeddingkey = None        
+
+        
 class IdentityKeynet(KeyNet):
-    """keynet.layers.IdentityKeynet class.   Testing only"""
-    def __init__(self, net, inshape, inkey):
+    """keynet.layers.IdentityKeynet class, useful for testing only"""
+    def __init__(self, net, inshape, inkey, backend='scipy', verbose=True):
 
         net.eval()
         netshape = keynet.torch.netshape(net, inshape)
@@ -310,26 +359,30 @@ class IdentityKeynet(KeyNet):
                        'A':sparse_identity_matrix(np.prod(v['outshape'])+1)}
                     for (k,v) in netshape.items() if 'inshape' in v and 'outshape' in v}
 
-        (i,o) = (netshape['input'], netshape['output'])                
-        assert layerkey[i]['Ainv'].shape == inkey.shape, "Invalid inkey"
+        (i,o) = (netshape['input'], netshape['output'])
+        layerkey['input'] = inkey  # paired with sensorkey
+        layerkey['output'] = layerkey[o]['A']
         layerkey[i]['Ainv'] = inkey  # paired with sensorkey
-        super(IdentityKeynet, self).__init__(net, inshape, layerkey)
+        super(IdentityKeynet, self).__init__(net, inshape, layerkey, backend, verbose)
     
 
 class PermutationKeynet(KeyNet):
-    def __init__(self, net, inshape, inkey, do_output_encryption=True):
+    def __init__(self, net, inshape, inkey, do_output_encryption=True, backend='scipy', verbose=True):
 
         net.eval()
-        netshape = keynet.torch.netshape(net, inshape)        
-        layerkey = {k:{'Ainv':sparse_permutation_matrix(np.prod(v['inshape'])+1),
-                       'A':sparse_permutation_matrix(np.prod(v['outshape'])+1)}
-                    for (k,v) in netshape.items() if 'inshape' in v and 'outshape' in v}
-        
-        (i,o) = (netshape['input'], netshape['output'])        
-        assert layerkey[i]['Ainv'].shape == inkey.shape, "Invalid inkey"
-        layerkey[i]['Ainv'] = inkey  # paired with sensorkey
-        layerkey[o]['A'] = None if not do_output_encryption else layerkey[o]['A'] 
-        super(PermutationKeynet, self).__init__(net, inshape, layerkey)
+        netshape = keynet.torch.netshape(net, inshape)
+        (i,o) = (netshape['input'], netshape['output'])
+        layerkey = {k:{'outkeypair':sparse_permutation_matrix_with_inverse(np.prod(v['outshape'])+1),                       
+                       'prevlayer':v['prevlayer']}
+                    for (k,v) in netshape.items() if k not in set(['input', 'output'])}
+
+        leafkey = {'input':inkey, 'output':layerkey[o]['outkeypair'][1] if do_output_encryption else None}  # private
+        layerkey = {k:{'A':v['outkeypair'][0] if k!=o or (k==o and do_output_encryption) else None,
+                       'Ainv':inkey if v['prevlayer'] == 'input' else layerkey[v['prevlayer']]['outkeypair'][1]}
+                    for (k,v) in layerkey.items()}
+        layerkey.update(leafkey)
+
+        super(PermutationKeynet, self).__init__(net, inshape, layerkey, backend, verbose)
 
         
 class StochasticKeynet(KeyNet):
