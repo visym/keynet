@@ -8,10 +8,11 @@ import PIL
 import uuid
 import tempfile
 import os
-
+from torch import nn
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 
 def count_keynet_parameters(model):
     """Hacky method to count total number of key-net sparse parameters"""
@@ -20,25 +21,44 @@ def count_keynet_parameters(model):
     except:
         return np.sum([getattr(model, layername).What.nnz if hasattr(getattr(model, layername).What, 'nnz') else getattr(model, layername).What.size for layername in dir(model) if hasattr(getattr(model, layername), 'What') and getattr(model, layername).What is not None])
 
-def conv2d_in_scipy(x,f,b=None,stride=1):
-    """Torch equivalent conv2d operation in scipy, with input tensor x, filter weight f and bias b"""
-    """x=[BATCH,INCHANNEL,HEIGHT,WIDTH], f=[OUTCHANNEL,INCHANNEL,HEIGHT,WIDTH], b=[OUTCHANNEL,1]"""
 
-    assert(len(x.shape) == 4 and len(f.shape) == 4)
-    assert(f.shape[1] == x.shape[1])  # equal inchannels
-    assert(f.shape[2]==f.shape[3] and f.shape[2]%2 == 1)  # filter is square, odd
-    assert(b.shape[0] == f.shape[0])  # weights and bias dimensionality match
+def netshape(net, inshape):
+    """Pass a dummy input into the network and retrieve the input and output shapes of all layers.  Requires named modules, and inplace layers might screw this up"""
+    d_modulename_to_shape = {}
+    x_dummy = torch.rand(1,inshape[0], inshape[1], inshape[2])
+    net.eval()
+    
+    def _layer_visitor(f_forward=None, _net=None):
+        """Recursively assign forward hooks for all layers within containers"""
+        """Returns list in order of forward visit with {'name'n:, 'hook':h} dictionary"""
+        hooklist = []
+        for name, layer in _net._modules.items():
+            if isinstance(layer, nn.Sequential):
+                hooklist = hooklist + _layer_visitor(f_forward, layer)
+            else:
+                assert not hasattr(layer, '__name')  # inplace layers?
+                layer.__name = name
+                hooklist.append(layer.register_forward_hook(f_forward))
+        return hooklist
 
-    (N,C,U,V) = (x.shape)
-    (M,K,P,Q) = (f.shape)
-    x_spatialpad = np.pad(x, ( (0,0), (0,0), ((P-1)//2, (P-1)//2), ((Q-1)//2, (Q-1)//2)), mode='constant', constant_values=0)
-    y = np.array([scipy.signal.correlate(x_spatialpad[n,:,:,:], f[m,:,:,:], mode='valid')[:,::stride,::stride] + (b[m] if b is not None else 0) for n in range(0,N) for m in range(0,M)])
-    return np.reshape(y, (N,M,U//stride,V//stride) )
+    def _get_shape(m, input, output):
+        d_modulename_to_shape[m.__name] = {'inshape':tuple(list(input[0].shape)[1:]), 'outshape':tuple(list(output.shape)[1:])}
+        if 'input' not in d_modulename_to_shape:
+            d_modulename_to_shape['input'] = m.__name  # first
+        d_modulename_to_shape['output'] = m.__name  # last
+        delattr(m, '__name')
+
+    hooks = _layer_visitor(_get_shape, net)
+    y_dummy = net.forward(x_dummy)
+    [h.remove() for h in hooks]
+    return d_modulename_to_shape
 
 
 def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1):
-    """ Returns sparse toeplitz matrix (W) in coo format that is equivalent to per-channel pytorch conv2d (spatial correlation)
-    see also: test_keynet.test_sparse_toeplitz_conv2d()"""
+    """ Returns sparse toeplitz matrix (W) in coo format that is equivalent to per-channel pytorch conv2d (spatial correlation) of filter f with a given image with shape=inshape vectorized
+        conv2d(img, f) == np.dot(W, img.flatten())
+        Example usage: test_keynet.test_sparse_toeplitz_conv2d()
+    """
 
     # Valid shapes
     assert(len(inshape) == 3 and len(f.shape) == 4)  # 3D tensor inshape=(inchannels, height, width), f.shape=(outchannels, kernelheight, kernelwidth, inchannels)
@@ -85,22 +105,6 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1)
     return T
 
 
-def avgpool2d_in_scipy(x, kernelsize, stride):
-    """Torch equivalent avgpool2d operation in scipy, with input tensor x"""
-    """x=[BATCH,INCHANNEL,HEIGHT,WIDTH]"""
-    """https://pytorch.org/docs/stable/nn.html#torch.nn.AvgPool2d"""
-
-    assert(len(x.shape) == 4 and kernelsize%2==1)  # odd kernel size (FIXME)
-
-    (N,C,U,V) = (x.shape)
-    (P,Q) = (kernelsize,kernelsize)
-    F = (1.0 / (kernelsize*kernelsize))*np.ones( (kernelsize,kernelsize))
-    (rightpad, leftpad) = ((P-1)//2, (Q-1)//2)
-    x_spatialpad = np.pad(x, ( (0,0), (0,0), (leftpad, rightpad), (leftpad,rightpad)), mode='constant', constant_values=0)
-    y = np.array([scipy.signal.correlate(x_spatialpad[n,m,:,:], F, mode='valid')[::stride,::stride] for n in range(0,N) for m in range(0,C)])
-    return np.reshape(y, (N,C,(U//stride),(V//stride)) )
-
-
 def sparse_toeplitz_avgpool2d(inshape, filtershape, stride):
     (outchannel, inchannel, filtersize, filtersize) = filtershape
     (M,U,V) = (inshape)
@@ -110,28 +114,26 @@ def sparse_toeplitz_avgpool2d(inshape, filtershape, stride):
     return sparse_toeplitz_conv2d(inshape, F, bias=None, stride=stride)
     
 
-def affine_augmentation(x):
-    return affine_augmentation_tensor(torch.as_tensor(x)).detach().numpy()
+def homogenize(x):
+    """Convert NxCxHxW tensor to Nx(C*H*W+1) tensor where last column is one"""
+    (N,C,H,W) = x.shape if len(x.shape)==4 else (1,*x.shape)
+    return torch.cat( (x.view(N,C*H*W), torch.ones(N,1, dtype=x.dtype)), dim=1)
 
-def affine_deaugmentation(x):
-    return affine_deaugmentation_tensor(torch.as_tensor(x)).detach().numpy()
 
-def affine_augmentation_tensor(x):
-    if len(x.shape) == 4:
-        (N,C,U,V) = x.shape
-    else:
-        (C,U,V) = x.shape
-        N = 1
-    return torch.t(torch.cat( (x.view(N,C*U*V), torch.ones(N,1)), dim=1)).contiguous()
+def dehomogenize(x):
+    """Convert Nx(K+1) tensor to NxK by removing last column"""
+    return torch.narrow(x, 1, 0, x.shape[1]-1)
 
-def affine_deaugmentation_tensor(x):
-    (K,N) = x.shape
-    return torch.t(torch.narrow(x, 0, 0, K-1)).contiguous()
 
-def affine_augmentation_matrix(W,bias=None):
-    (M,N) = W.shape
-    b = torch.zeros(M,0) if bias is None else bias.reshape(M,1)
-    W_affine = torch.cat( (torch.cat( (W,b), dim=1), torch.zeros(1,N+1)), dim=0)
+def homogenize_matrix(W, bias=None):
+    """Convert matrix W of size (RxC) to (R+1)x(C+1) and return [W^T 0; b^T 1].  
+       For x of size (NxK), then this is equivalent to *left* multiplication
+       homogenize(x).dot(homogenize_matrix(W,b)) === homogenize(x).dot(W.t()) + b.t(). 
+    """
+    W_transpose = W.t()
+    (R,C) = W_transpose.shape
+    b = torch.zeros(1,C) if bias is None else bias.reshape(1,C)
+    W_affine = torch.cat( (torch.cat( (W_transpose, b), dim=0), torch.zeros(R+1, 1)), dim=1)
     W_affine[-1,-1] = 1        
     return W_affine
     

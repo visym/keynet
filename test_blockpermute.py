@@ -11,21 +11,28 @@ import copy
 import scipy.signal
 import scipy.ndimage
 import torch.nn.functional as F
-import torch 
+import torch
+import keynet.blockpermute
 from keynet.blockpermute import block_permutation_mask, block_permute, local_permutation_mask, global_permutation_mask
-from keynet.util import savetemp, imshow
+import vipy.image
+import vipy.visualize
 
 
-def test_checkerboard_permute():
+def imshow(img):
+    return vipy.image.Image(array=img, colorspace='rgb').show()
+
+
+def show_checkerboard_permute():
     img = np.uint8(255*np.random.rand(8,8,3))
     img = np.array(PIL.Image.fromarray(img).resize( (256,256), PIL.Image.NEAREST))
 
     mask = block_permutation_mask(256,2, minscale=8)
     img_permuted = block_permute(img, mask)
-    imshow(img)
-    imshow(img_permuted)
+    return (vipy.image.Image(array=img, colorspace='rgb').show(),
+            vipy.image.Image(array=img_permuted, colorspace='rgb').show())
 
-def test_corner_permute():
+
+def show_corner_permute():
     img = np.zeros( (243,243,3) ).astype(np.uint8)
     img[0:3,0:3] = 64
     img[0:3,-3:] = 128
@@ -38,7 +45,7 @@ def test_corner_permute():
     imshow(img_permuted)
     
     
-def test_image_permute(imgfile):
+def show_image_permute(imgfile):
     img = np.array(PIL.Image.open(imgfile).resize( (256,256) ))        
     mask = block_permutation_mask(256, 4, minscale=4)
     img_permuted = block_permute(img, mask)
@@ -46,7 +53,7 @@ def test_image_permute(imgfile):
     imshow(img_permuted)
 
 
-def test_vgg16_permute(imgfile):
+def show_vgg16_permute(imgfile):
     # The input image must be 243x243, you will need to center crop your 256x256 images to 243x243
     img = np.array(PIL.Image.open(imgfile).resize( (243,243) ))
 
@@ -64,22 +71,24 @@ def test_vgg16_permute(imgfile):
     return img_cropped
     
 
-def test_256x256_local_block_permutation(imgfile='owl.jpg'):
+def show_256x256_local_block_permutation(imgfile='owl.jpg'):
     # The mask should have a subblock size of 2x2, with six levels.  The top levels are not permuted, the bottom level is permuted
     img = np.array(PIL.Image.open(imgfile).resize( (256,256) ))
     mask = local_permutation_mask(256, 2, minscale=4, identityscale=5)
     img_permuted = block_permute(img, mask)
     imshow(img_permuted)
 
-def test_256x256_global_block_permutation(imgfile='owl.jpg'):
+    
+def show_256x256_global_block_permutation(imgfile='owl.jpg'):
     # The mask should have a subblock size of 2x2, with two levels.  The top level is permuted, the second level is not permuted
     # This is equivalent to the block_permutation with one level
     img = np.array(PIL.Image.open(imgfile).resize( (256,256) ))
     mask = global_permutation_mask(256, 2, minscale=7, identityscale=8)
     img_permuted = block_permute(img, mask)
     imshow(img_permuted)
+
     
-def test_vgg16_local_block_permutation(imgfile='owl.jpg'):
+def show_vgg16_local_block_permutation(imgfile='owl.jpg'):
     img = np.array(PIL.Image.open(imgfile).resize( (243,243) ))
     mask = local_permutation_mask(243, 3, minscale=3, identityscale=4)
 

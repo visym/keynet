@@ -8,32 +8,55 @@ import uuid
 import tempfile
 import os
 import time
+from vipy.util import groupbyasdict
 
 
-def sparse_block_diag(mats, format='coo', dtype=None):
-    """https://github.com/scipy/scipy/issues/9223"""
-    """Faster than scipy.sparse.block_diag"""
-    dtype = np.dtype(dtype)
-    row = []
-    col = []
-    data = []
-    r_idx = 0
-    c_idx = 0
-    for ia, a in enumerate(mats):
-        if scipy.sparse.issparse(a):
-            a = a.tocsr()
-        else:
-            a = scipy.sparse.coo_matrix(a).tocsr()
-        nrows, ncols = a.shape
-        for r in range(nrows):
-            for c in range(ncols):
-                if a[r, c] is not None:
-                    row.append(r + r_idx)
-                    col.append(c + c_idx)
-                    data.append(a[r, c])
-        r_idx = r_idx + nrows
-        c_idx = c_idx + ncols
-    return scipy.sparse.coo_matrix((data, (row, col)), dtype=dtype).asformat(format)
+def torch_avgpool2d_in_scipy(x, kernelsize, stride):
+    """Torch equivalent avgpool2d operation in scipy, with input tensor x"""
+    """x=[BATCH,INCHANNEL,HEIGHT,WIDTH]"""
+    """https://pytorch.org/docs/stable/nn.html#torch.nn.AvgPool2d"""
+
+    assert(len(x.shape) == 4 and kernelsize%2==1)  # odd kernel size (FIXME)
+
+    (N,C,U,V) = (x.shape)
+    (P,Q) = (kernelsize,kernelsize)
+    F = (1.0 / (kernelsize*kernelsize))*np.ones( (kernelsize,kernelsize))
+    (rightpad, leftpad) = ((P-1)//2, (Q-1)//2)
+    x_spatialpad = np.pad(x, ( (0,0), (0,0), (leftpad, rightpad), (leftpad,rightpad)), mode='constant', constant_values=0)
+    y = np.array([scipy.signal.correlate(x_spatialpad[n,m,:,:], F, mode='valid')[::stride,::stride] for n in range(0,N) for m in range(0,C)])
+    return np.reshape(y, (N,C,(U//stride),(V//stride)) )
+
+
+def torch_conv2d_in_scipy(x,f,b=None,stride=1):
+    """Torch equivalent conv2d operation in scipy, with input tensor x, filter weight f and bias b
+    x=[BATCH,INCHANNEL,HEIGHT,WIDTH], f=[OUTCHANNEL,INCHANNEL,HEIGHT,WIDTH], b=[OUTCHANNEL,1]"""
+
+    assert(len(x.shape) == 4 and len(f.shape) == 4)
+    assert(f.shape[1] == x.shape[1])  # equal inchannels
+    assert(f.shape[2]==f.shape[3] and f.shape[2]%2 == 1)  # filter is square, odd
+    if b is not None:
+        assert(b.shape[0] == f.shape[0])  # weights and bias dimensionality match
+
+    (N,C,U,V) = (x.shape)
+    (M,K,P,Q) = (f.shape)
+    x_spatialpad = np.pad(x, ( (0,0), (0,0), ((P-1)//2, (P-1)//2), ((Q-1)//2, (Q-1)//2)), mode='constant', constant_values=0)
+    y = np.array([scipy.signal.correlate(x_spatialpad[n,:,:,:], f[m,:,:,:], mode='valid')[:,::stride,::stride] + (b[m] if b is not None else 0) for n in range(0,N) for m in range(0,M)])
+    return np.reshape(y, (N,M,U//stride,V//stride) )
+
+                
+def sparse_block_diag(mats, format='coo'):
+    """Create a sparse matrix with elements in mats as blocks on the diagonal"""
+    n = len(mats)    
+    (rows,cols,data) = ([],[],[])
+    (U,V) = (0,0)
+    for (k,b) in enumerate(mats):
+        b = scipy.sparse.coo_matrix(b)
+        for i,j,v in zip(b.row, b.col, b.data):
+            rows.append(i+U)
+            cols.append(j+V)
+            data.append(v)
+        (U, V) = (U+b.shape[0], V+b.shape[1])            
+    return scipy.sparse.coo_matrix( (data, (rows, cols)), shape=(U, V)).asformat(format)
 
 
 def random_dense_positive_definite_matrix(n, dtype=np.float32):
@@ -61,26 +84,29 @@ def gaussian_random_dense_diagonal_matrix(n,sigma=1):
     d = sigma*np.random.randn(n)
     return (np.diag(d))
 
+def gaussian_random_sparse_diagonal_matrix(n, sigma=1):
+    d = sigma*np.random.randn(n)
+    return scipy.sparse.diag(d)
+
 def uniform_random_dense_diagonal_matrix(n,scale=1,eps=1E-6):
     d = scale*np.random.rand(n) + eps
     return (np.diag(d))
 
+def uniform_random_sparse_diagonal_matrix(n,scale=1,eps=1E-6):
+    d = scale*np.random.rand(n) + eps
+    return scipy.sparse.diags(d)
+
 def checkerboard_256x256():
-    """Random color 8x8 checkerboard at 256x256 resolution"""
+    """Random uint8 rgb color 8x8 checkerboard at 256x256 resolution"""
     img = np.uint8(255*np.random.rand(8,8,3))
     img = np.array(PIL.Image.fromarray(img).resize( (256,256), PIL.Image.NEAREST))
     return img
 
-def imshow(img):
-    """Use system viewer for uint8 image saved as temporary png"""
-    f = os.path.join(tempfile.getempdir(),'%s.png' % uuid.uuid1().hex)
-    im = PIL.Image.fromarray(img.astype(np.uint8)).save(f)
-    os.system('open %s' % f)
+def numpy_homogenize(x):
+    return np.hstack( (x.flatten(), 1) )
 
-def savetemp(img):
-    f = '/tmp/%s.png' % uuid.uuid1().hex
-    PIL.Image.fromarray(img.astype(np.uint8)).save(f)
-    return f
+def numpy_dehomogenize(x):
+    return x.flatten()[0:-1]
 
 def sparse_permutation_matrix(n, dtype=np.float32):
     data = np.ones(n).astype(dtype)
@@ -130,7 +156,7 @@ def sparse_random_diagonally_dominant_doubly_stochastic_matrix(n, k=None, n_iter
     return A
     
 
-def sparse_stochastic_matrix(n,m):
+def sparse_stochastic_matrix_with_inverse(n, m):  # FIXME: with inverse
     """Returns (A,Ainv) for (nxn) sparse matrix of the form P*S*I, where S is block diagonal of size m, and P is permutation"""
     """Setting m=1 results in a permutation matrix"""
     #assert(k<=m and n>=m) 
@@ -150,7 +176,7 @@ def sparse_stochastic_matrix(n,m):
     return(A,Ainv)
 
 
-def sparse_positive_definite_block_diagonal(n, m, dtype=np.float32):
+def sparse_positive_definite_block_diagonal_with_inverse(n, m, dtype=np.float32):
     m = np.minimum(n,m)
     B = [random_dense_positive_definite_matrix(m,dtype) for j in np.arange(0,n-m,m)]
     B = B + [random_dense_positive_definite_matrix(n-len(B)*m, dtype)]
@@ -160,13 +186,13 @@ def sparse_positive_definite_block_diagonal(n, m, dtype=np.float32):
     return(A,Ainv)
 
 
-def sparse_generalized_stochastic_block_matrix(n,m,dtype=np.float32):
+def sparse_generalized_stochastic_block_matrix_with_inverse(n, m, dtype=np.float32):
     """Returns (A,Ainv) for (nxn) sparse matrix of the form P*S*D, where D is uniform random diagonal, S is stochastic block matrix of size m, and P is permutation"""
     """Setting m=1 results in scaled permutation matrix"""
     #assert(k<=m and n>=m) 
-    m = np.minimum(n,m)
+    m = np.minimum(n, m)
 
-    (M,Minv) = sparse_stochastic_matrix(n,m)
+    (M, Minv) = sparse_stochastic_matrix_with_inverse(n,m)
     D = sparse_uniform_random_diagonal_matrix(n)
     A = M*D
     Dinv = sparse_inverse_diagonal_matrix(D)
@@ -174,12 +200,12 @@ def sparse_generalized_stochastic_block_matrix(n,m,dtype=np.float32):
 
     return(A.astype(np.float32), Ainv.astype(np.float32))
 
-def sparse_generalized_permutation_block_matrix(n, m, dtype=np.float32):
+def sparse_generalized_permutation_block_matrix_with_inverse(n, m, dtype=np.float32):
     """Returns (A,Ainv) for (nxn) sparse matrix of the form B*P*D, where D is uniform random diagonal, B is block diagonal of size m, and P is permutation"""
     """Setting m=k=1 results in scaled permutation matrix"""
     m = np.minimum(n,m)
 
-    (B,Binv) = sparse_positive_definite_block_diagonal(n,m,dtype=np.float64)
+    (B,Binv) = sparse_positive_definite_block_diagonal_with_inverse(n,m,dtype=np.float64)
     D = sparse_uniform_random_diagonal_matrix(n,dtype=np.float64)
     P = sparse_permutation_matrix(n,dtype=np.float64)
     A = B*P*D
@@ -188,35 +214,6 @@ def sparse_generalized_permutation_block_matrix(n, m, dtype=np.float32):
     Ainv = Dinv * Pinv * Binv
 
     return(A.astype(dtype), Ainv.astype(dtype))
-
-
-class Stopwatch(object):
-    """Return elapsed system time in seconds between calls to enter and exit"""
-    """Copied from vipy.util.Stopwatch"""
-    def __init__(self):
-        self.reset()
-
-    def __enter__(self):
-        self.start = time.time()
-        self.last = self.start
-        return self
-
-    def __exit__(self, *args):
-        self.end = time.time()
-        self.elapsed = self.end - self.start
-
-    def since(self, start=False):
-        """Return seconds since start or last call to this method"""
-        now = time.time()
-        dur = now - self.start if start is True else now - self.last
-        self.last = now
-        return dur
-
-    def reset(self):
-        self.start = time.time()
-        self.last = self.start
-        return self
-
 
 
     
