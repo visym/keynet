@@ -7,7 +7,7 @@ python-3.*
 Required 
 
 ```python
-pip3 install torch torchvision numpy scipy vipy
+pip3 install torch torchvision numpy scipy vipy scikit-learn
 ```
 
 Optional 

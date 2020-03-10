@@ -179,7 +179,7 @@ class SparseTiledMatrix(object):
         T = T.tocoo()
         (B, M, n) = ([], {}, tilesize)
         ijv = [(i,j,v) for (i,j,v) in zip(T.row, T.col, T.data)]  # preallocate
-        ijv.sort(ijv, key=lambda x: (x[0]//n, x[1]//n))  # in-place sort for groupby, sort only indexes
+        ijv.sort(key=lambda x: (x[0]//n, x[1]//n))  # in-place sort for groupby, sort only indexes
         d_blockidx_to_entries = {k:sorted(v, key=lambda y: (y[0], y[1])) for (k,v) in groupby(ijv, key=lambda x: (x[0]//n, x[1]//n))}   # sorted for hash
         for i in range(0, T.shape[0], n):
             for j in range(0, T.shape[1], n):
