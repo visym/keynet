@@ -63,7 +63,7 @@ def netshape(net, inshape):
 
 def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1):
     """ Returns sparse toeplitz matrix (W) in coo format that is equivalent to per-channel pytorch conv2d (spatial correlation) of filter f with a given image with shape=inshape vectorized
-        conv2d(img, f) == np.dot(W, img.flatten())
+        conv2d(img, f) == np.dot(W, img.flatten()), right multiplied
         Example usage: test_keynet.test_sparse_toeplitz_conv2d()
     """
 

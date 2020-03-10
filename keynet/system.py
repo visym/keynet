@@ -25,6 +25,11 @@ def PermutationTiledKeynet(inshape, net, tilesize, do_output_encryption=False):
     knet = keynet.layer.PermutationTiledKeynet(net, inshape, inkey=sensor.key(), tilesize=tilesize, do_output_encryption=do_output_encryption)
     return (sensor, knet)
 
+def IdentityTiledKeynet(inshape, net, tilesize, do_output_encryption=False):
+    sensor = keynet.sensor.IdentityTiledKeysensor(inshape, tilesize)
+    knet = keynet.layer.IdentityTiledKeynet(net, inshape, inkey=sensor.key(), tilesize=tilesize, do_output_encryption=do_output_encryption)
+    return (sensor, knet)
+
 
 
     

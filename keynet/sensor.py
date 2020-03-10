@@ -2,7 +2,7 @@ import numpy as np
 import vipy
 import warnings
 from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse, sparse_identity_matrix
-from keynet.sparse import sparse_stochastic_matrix_with_inverse, sparse_permutation_tiled_matrix_with_inverse
+from keynet.sparse import sparse_stochastic_matrix_with_inverse, sparse_permutation_tiled_matrix_with_inverse, sparse_identity_tiled_matrix_with_inverse
 from keynet.sparse import SparseTiledMatrix
 from keynet.torch import homogenize, dehomogenize
 from keynet.layer import KeyedLayer
@@ -89,6 +89,12 @@ class StochasticKeysensor(Keysensor):
         super(StochasticKeysensor, self).__init__(inshape, encryptkey, decryptkey, backend)
 
 
+class IdentityTiledKeysensor(Keysensor):
+    def __init__(self, inshape, tilesize):
+        (encryptkey, decryptkey) = sparse_identity_tiled_matrix_with_inverse(np.prod(inshape)+1, tilesize)
+        super(IdentityTiledKeysensor, self).__init__(inshape, encryptkey, decryptkey, backend='tiled')
+
+                                    
 class PermutationTiledKeysensor(Keysensor):
     def __init__(self, inshape, tilesize):
         (encryptkey, decryptkey) = sparse_permutation_tiled_matrix_with_inverse(np.prod(inshape)+1, tilesize)

@@ -10,7 +10,8 @@ import os
 import time
 from vipy.util import groupbyasdict
 from keynet.util import random_positive_definite_matrix
-
+import copy
+from itertools import groupby
 
 def sparse_block_diag(mats, format='coo'):
     """Create a sparse matrix with elements in mats as blocks on the diagonal"""
@@ -159,11 +160,11 @@ def sparse_generalized_permutation_block_matrix_with_inverse(n, m, dtype=np.floa
 
 
 class SparseTiledMatrix(object):
-    def __init__(self, tilesize, coo_matrix=None, blocktoeplitz=None, shape=None):
+    def __init__(self, tilesize=None, coo_matrix=None, blocktoeplitz=None, shape=None):
         if coo_matrix is not None:
             self.from_coomatrix(coo_matrix, tilesize)
         elif blocktoeplitz is not None:
-            self.from_blocktoeplitz(shape, blocktoeplitz, tilesize)
+            self.from_blocktoeplitz(shape, blocktoeplitz)
         else:
             raise ValueError('Must provide a constructor')
 
@@ -177,14 +178,16 @@ class SparseTiledMatrix(object):
         """
         T = T.tocoo()
         (B, M, n) = ([], {}, tilesize)
-        d_blockidx_to_entries = groupbyasdict( [(i,j,v, (i//n, j//n)) for (i,j,v) in zip(T.row, T.col, T.data)], lambda x: x[3])
+        ijv = [(i,j,v) for (i,j,v) in zip(T.row, T.col, T.data)]  # preallocate
+        ijv.sort(ijv, key=lambda x: (x[0]//n, x[1]//n))  # in-place sort for groupby, sort only indexes
+        d_blockidx_to_entries = {k:sorted(v, key=lambda y: (y[0], y[1])) for (k,v) in groupby(ijv, key=lambda x: (x[0]//n, x[1]//n))}   # sorted for hash
         for i in range(0, T.shape[0], n):
             for j in range(0, T.shape[1], n):
                 if (i//n,j//n) in d_blockidx_to_entries:
-                    (rows, cols, vals) = zip(*[(ii-i,jj-j,v) for (ii,jj,v,ul) in d_blockidx_to_entries[(i//n,j//n)]])
-                    m = scipy.sparse.coo_matrix( (vals, (rows,cols)), shape=(n, n)).todense().astype(np.float32)  # submatrix
-                    k = hash(m.tostring())
+                    (rows, cols, vals) = zip(*[(ii-i,jj-j,v) for (ii,jj,v) in d_blockidx_to_entries[(i//n,j//n)]])
+                    k = hash((vals, (rows, cols)))
                     if k not in M:
+                        m = scipy.sparse.coo_matrix( (vals, (rows,cols)), shape=(n, n)).todense().astype(np.float32)  # submatrix                                            
                         M[k] = torch.as_tensor(m)
                 else:
                     k = None
@@ -197,14 +200,22 @@ class SparseTiledMatrix(object):
         self.ndim = 2
         return self
 
-    def from_blocktoeplitz(self, shape, B, tilesize):
+    def from_blocktoeplitz(self, shape, B):
         """A block Toeplitz matrix has blocks repeated down the main diagonal"""
         assert B.shape[0] == B.shape[1] and B.ndim == 2, "Invalid block, must be square"
-        self._tilesize = tilesize
+        self._tilesize = B.shape[0]
         self.shape = shape
         n = self._tilesize
         self._B = [(i//n, i//n, 0) for i in range(0, min(self.shape), n)]
-        self._M = {0: torch.as_tensor(B)}        
+        self._M = {0: torch.as_tensor(B)}
+        if min(self.shape) % n != 0:
+            (H,W) = shape            
+            (i,j,k) = self._B[-1]
+            self._B[-1] = (i,j,1)
+            #Z = np.zeros_like(B)
+            Z = np.identity(B.shape[0], dtype=B.dtype)  # boundary must be invertible
+            Z[H-i*n:, W-j*n:] = 0
+            self._M[1] = torch.as_tensor(Z)
         self.dtype = B.dtype
         self.ndim = 2
         return self    
@@ -220,8 +231,6 @@ class SparseTiledMatrix(object):
     
     def leftdot(self, x):
         """Input is NxCxHxW tensor viewed as Nx(C*H*W) tensor, compute left matrix multiplication (x * T) return (NxC*H*W)"""
-        if isinstance(x, SparseTiledMatrix):
-            return copy.deepcopy(self).prod(x)
         n = self._tilesize
         (H,W) = self.shape        
         y = torch.zeros((x.shape[0], W), dtype=x.dtype, device=x.device)
@@ -231,6 +240,17 @@ class SparseTiledMatrix(object):
                 y[:, j*n:W_clip] += torch.matmul(x[:, i*n:H_clip], self._M[k][0:(H_clip-i*n), 0:(W_clip-j*n)])
         return y
 
+    def dot(self, x):
+        """Input is (C*H*W+1)xN tensor, compute right matrix multiplication T*x, return (-1)xN"""
+        n = self._tilesize
+        (H,W) = self.shape        
+        y = torch.zeros((H, x.shape[1]), dtype=x.dtype, device=x.device)
+        for (i,j,k) in self._B:
+            if k is not None:
+                (H_clip, W_clip) = (min(H, i*n+n), min(W, j*n+n))
+                y[i*n:H_clip, :] += torch.matmul(self._M[k][0:(H_clip-i*n), 0:(W_clip-j*n)], x[j*n:W_clip, :])
+        return y
+                
     def transpose(self):
         self._B = [(j,i,k) for (i,j,k) in self._B]
         self._M = {k:v.t() for (k,v) in self._M.items()}
@@ -241,20 +261,32 @@ class SparseTiledMatrix(object):
         """For two Tiled() object T1, T2, compute T1.dot(T2) and save in T1"""
         assert isinstance(other, SparseTiledMatrix)
         assert other._tilesize == self._tilesize
-        
+
+        n = self.tilesize()
+        (H,W) = self.shape
+
+        # Pre-multiply
+        d_product = {}
+        for (v, m) in self._M.items():
+            for (vo, mo) in other._M.items():
+                d_product[(v,vo)] = torch.matmul(m, mo)
+
+        # Accumulate
         M_accum = {}
+        M_hash = {}
         for (i, jj, v) in self._B:
             for (ii, j, vo) in other._B:
                 if jj == ii and v is not None and vo is not None:
-                    m = torch.matmul(self._M[v], other._M[vo])
                     if (i,j) not in M_accum:
-                        M_accum[(i,j)] = m
+                        M_accum[(i,j)] = d_product[(v,vo)]
+                        M_hash[(i,j)] = v+vo
                     else:
-                        M_accum[(i,j)] += m
+                        M_accum[(i,j)] += d_product[(v,vo)]
+                        M_hash[(i,j)] += v+vo                        
 
         (B, M) = ([], {})
         for ((i,j), m) in M_accum.items():
-            k = hash(m)
+            k = M_hash[(i,j)]
             if k not in M:
                 M[k] = m
             B.append( (i,j,k) )                        
@@ -271,7 +303,16 @@ class SparseTiledMatrix(object):
         return scipy.sparse.bmat([ [scipy.sparse.coo_matrix(self._M[d[(i,j)]][0:min(n, H-i), 0: min(n, W-j)]) if ((i,j) in d and d[(i,j)] is not None) else scipy.sparse.coo_matrix( (min(n, H-i), min(n, W-j)) ) for j in range(0,W,n)]
                                 for i in range(0,H,n)])
 
+    def clone(self):
+        return copy.deepcopy(self)
+
     
+def sparse_identity_tiled_matrix_with_inverse(N, tilesize):
+    (B, Binv) = (sparse_identity_matrix(tilesize), sparse_identity_matrix(tilesize))
+    return (SparseTiledMatrix(shape=(N,N), blocktoeplitz=B.todense(), tilesize=tilesize),
+            SparseTiledMatrix(shape=(N,N), blocktoeplitz=Binv.todense(), tilesize=tilesize))
+
+
 def sparse_permutation_tiled_matrix_with_inverse(N, tilesize):
     (B, Binv) = sparse_permutation_matrix_with_inverse(tilesize)
     return (SparseTiledMatrix(shape=(N,N), blocktoeplitz=B.todense(), tilesize=tilesize),

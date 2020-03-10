@@ -3,7 +3,7 @@ from numpy.linalg import multi_dot
 from keynet.torch import homogenize_matrix, sparse_toeplitz_conv2d, sparse_toeplitz_avgpool2d, scipy_coo_to_torch_sparse
 from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse, sparse_identity_matrix
 from keynet.sparse import sparse_stochastic_matrix_with_inverse, sparse_generalized_permutation_matrix_with_inverse, sparse_identity_matrix_like
-from keynet.sparse import sparse_permutation_tiled_matrix_with_inverse, SparseTiledMatrix
+from keynet.sparse import sparse_permutation_tiled_matrix_with_inverse, SparseTiledMatrix, sparse_identity_tiled_matrix_with_inverse
 import torch
 import numpy as np
 import scipy.sparse
@@ -40,22 +40,21 @@ class KeyedLayer(nn.Module):
              x_affine is (N x C*U*V+1) torch tensor
 
            Output:
-             y=x*W, (N x -1) torch tensor
+             y=(W*x^T)^T, (N x -1) torch tensor, right multiplied
 
         """
         if self._backend == 'torch':
             if isinstance(self.W, torch.sparse.FloatTensor):
-                return torch.sparse.mm(x_affine, self.W)   # torch.sparse, left multiply
+                return torch.sparse.mm(self.W, x_affine.t()).t()   # torch.sparse, right multiply
             else:
-                return torch.matmul(x_affine, self.W)  # torch dense, left multiply
+                return torch.matmul(self.W, x_affine.t()).t()      # torch dense, right multiply
         elif self._backend == 'scipy':
             return torch.as_tensor(self.W.dot(x_affine.detach().numpy().transpose())).t()  # scipy.sparse, right multiply required
         elif self._backend == 'cupy':
             try_import(package='cupy', pipname='cupy, cupyx')
-            #return from_dlpack(self.W.dot(cupy.fromDlpack(to_dlpack(x_affine))).toDlpack())
-            raise
+            return from_dlpack(self.W.dot(cupy.fromDlpack(to_dlpack(x_affine.t()))).toDlpack()).t()
         elif self._backend == 'tiled':
-            return self.W.leftdot(x_affine)
+            return self.W.dot(x_affine.t()).t()  # right multiply
         else:
             raise ValueError('Invalid backend "%s"' % self._backend)
 
@@ -106,13 +105,15 @@ class KeyedLayer(nn.Module):
 
             if not scipy.sparse.issparse(W) and W is not None:
                 W = scipy.sparse.coo_matrix(W.detach().numpy())
-                
+            
             if W is None:
-                self.W = A.prod(Ainv).transpose()  # left multiply                    
+                self.W = A.prod(Ainv)  # right multiply                    
             elif A is None:
-                self.W = SparseTiledMatrix(coo_matrix=W.tocoo(), tilesize=Ainv.tilesize()).prod(Ainv).transpose()  # left multiply                    
+                self.W = (SparseTiledMatrix(coo_matrix=W.tocoo(), tilesize=Ainv.tilesize()).prod(Ainv))   # right multiply                    
             else:
-                self.W = A.prod(SparseTiledMatrix(coo_matrix=W.tocoo(), tilesize=Ainv.tilesize()).prod(Ainv)).transpose()  # left multiply
+                T = SparseTiledMatrix(coo_matrix=W.tocoo(), tilesize=Ainv.tilesize())
+                TAinv = T.prod(Ainv)
+                self.W = A.prod(TAinv)  # right multiply
         else:
             raise ValueError('Invalid backend "%s"' % self._backend)
         return self
@@ -316,6 +317,13 @@ class StochasticKeynet(KeyNet):
         super(StochasticKeynet, self).__init__(net, inshape, inkey, f_layername_to_keypair, do_output_encryption, backend, verbose)
         
 
+class IdentityTiledKeynet(KeyNet):
+    def __init__(self, net, inshape, inkey, tilesize, do_output_encryption=True, verbose=True):    
+        f_layername_to_keypair = lambda layername, outshape: (sparse_identity_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize) if 'relu' not in layername else
+                                                              sparse_identity_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize))
+        super(IdentityTiledKeynet, self).__init__(net, inshape, inkey, f_layername_to_keypair, do_output_encryption, backend='tiled', verbose=verbose)
+
+        
 class PermutationTiledKeynet(KeyNet):
     def __init__(self, net, inshape, inkey, tilesize, do_output_encryption=True, verbose=True):    
         f_layername_to_keypair = lambda layername, outshape: (sparse_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize) if 'relu' not in layername else
