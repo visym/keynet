@@ -178,13 +178,14 @@ class SparseTiledMatrix(object):
         """
         T = T.tocoo()
         (B, M, n) = ([], {}, tilesize)
-        ijv = [(i,j,v) for (i,j,v) in zip(T.row, T.col, T.data)]  # preallocate
-        ijv.sort(key=lambda x: (x[0]//n, x[1]//n))  # in-place sort for groupby, sort only indexes
-        d_blockidx_to_entries = {k:sorted(v, key=lambda y: (y[0], y[1])) for (k,v) in groupby(ijv, key=lambda x: (x[0]//n, x[1]//n))}   # sorted for hash
+        ijv = [(i,j,v, (i//n,j//n)) for (i,j,v) in zip(T.row, T.col, T.data)]  # preallocate
+        ijv.sort(key=lambda x: x[3])  # in-place sort for groupby, sort only indexes
+        d_blockidx_to_entries = {k:sorted(v, key=lambda y: (y[0], y[1])) for (k,v) in groupby(ijv, key=lambda x: x[3])}   # sorted for hash
+        print(len(d_blockidx_to_entries))
         for i in range(0, T.shape[0], n):
             for j in range(0, T.shape[1], n):
                 if (i//n,j//n) in d_blockidx_to_entries:
-                    (rows, cols, vals) = zip(*[(ii-i,jj-j,v) for (ii,jj,v) in d_blockidx_to_entries[(i//n,j//n)]])
+                    (rows, cols, vals) = zip(*[(ii-i,jj-j,v) for (ii,jj,v,ul) in d_blockidx_to_entries[(i//n,j//n)]])
                     k = hash((vals, (rows, cols)))
                     if k not in M:
                         m = scipy.sparse.coo_matrix( (vals, (rows,cols)), shape=(n, n)).todense().astype(np.float32)  # submatrix                                            
