@@ -5,9 +5,6 @@ from time import time
 from torchvision import datasets, transforms
 from torch import nn, optim
 import torch.nn.functional as F
-import keynet.layers
-from keynet.util import sparse_permutation_matrix, sparse_identity_matrix, sparse_uniform_random_diagonal_matrix, sparse_inverse_diagonal_matrix
-from keynet.util import sparse_generalized_stochastic_block_matrix_with_inverse, sparse_generalized_permutation_block_matrix_with_inverse, sparse_stochastic_matrix_with_inverse
 from vipy.util import Stopwatch, tempdir
 
 

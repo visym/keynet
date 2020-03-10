@@ -5,14 +5,8 @@ from time import time
 from torchvision import datasets, transforms
 from torch import nn, optim
 import torch.nn.functional as F
-import keynet.mnist 
-import keynet.layers
-import keynet.fiberbundle
-from keynet.util import sparse_permutation_matrix, sparse_identity_matrix, sparse_uniform_random_diagonal_matrix, sparse_inverse_diagonal_matrix
-from keynet.util import sparse_generalized_permutation_block_matrix_with_inverse
 from vipy.util import tempdir
 import multiprocessing
-import keynet.torch
 
 
 class AllConvNet(nn.Module):

@@ -10,13 +10,12 @@ import torchvision
 from torch import nn
 from torchvision import datasets, transforms
 from vipy.util import Stopwatch, tempdir
-from keynet.util import sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse
-from keynet.util import sparse_generalized_stochastic_block_matrix_with_inverse, sparse_identity_matrix
+from keynet.sparse import sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse
+from keynet.sparse import sparse_generalized_stochastic_block_matrix_with_inverse, sparse_identity_matrix
 from keynet.torch import homogenize, dehomogenize
 from keynet.torch import sparse_toeplitz_conv2d
 from keynet.torch import sparse_toeplitz_avgpool2d
 from keynet.util import torch_avgpool2d_in_scipy, torch_conv2d_in_scipy
-from keynet.util import sparse_diagonal_matrix, sparse_inverse_diagonal_matrix, random_dense_positive_definite_matrix
 import keynet.util
 import keynet.blockpermute
 import keynet.mnist
@@ -34,13 +33,13 @@ def example_2x2():
 
     img = np.array([[11,12],[21,22]]).astype(np.float32)
     x = img.flatten().reshape(4,1)
-    D1 = keynet.util.uniform_random_dense_diagonal_matrix(4)
-    P1 = keynet.util.random_dense_doubly_stochastic_matrix(4,2)
+    D1 = keynet.util.uniform_random_diagonal_matrix(4)
+    P1 = keynet.util.random_doubly_stochastic_matrix(4,2)
     A1 = np.dot(D1,P1)
     A1inv = np.linalg.inv(A1)
 
-    P2 = keynet.util.random_dense_permutation_matrix(4)
-    D2 = keynet.util.uniform_random_dense_diagonal_matrix(4)
+    P2 = keynet.util.random_permutation_matrix(4)
+    D2 = keynet.util.uniform_random_diagonal_matrix(4)
     A2 = np.dot(D2,P2)
     A2inv = np.linalg.inv(A2)
 
