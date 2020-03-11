@@ -107,7 +107,7 @@ class OpticalFiberBundle(Keysensor):
         (encryptkey, decryptkey) = (sparse_identity_matrix(np.prod(inshape)+1), sparse_identity_matrix(np.prod(inshape)+1))
         super(OpticalFiberBundle, self).__init__(inshape, encryptkey, decryptkey, backend='scipy')
     
-    def load(self, imgfile)
+    def load(self, imgfile):
         img_color = vipy.image.Image(imgfile).maxdim(max(self._inshape)).centercrop(height=self._inshape[1], width=self._inshape[2]).numpy()
         img_sim = keynet.fiberbundle.simulation(img_color, h_xtalk=0.05, v_xtalk=0.05, fiber_core_x=16, fiber_core_y=16, do_camera_noise=True)
         return vipy.image.Image(array=np.uint8(img_sim), colorspace='rgb')
