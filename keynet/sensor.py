@@ -21,17 +21,17 @@ class Keysensor(KeyedLayer):
         return str('<Keysensor: height=%d, width=%d, channels=%d>' % (self._inshape[1], self._inshape[2], self._inshape[0]))
     
     def load(self, imgfile):
-        im = vipy.image.Image(imgfile).resize(self._inshape[1], self._inshape[2])
+        im = vipy.image.Image(imgfile).resize(height=self._inshape[1], width=self._inshape[2])
         if self._inshape[0] == 1:
             im = im.grey()
-        self._tensor = im.torch().contiguous()
+        self._tensor = im.float().torch().contiguous()
         return self
 
     def tensor(self, x=None):
         if x is None:
             return self._tensor
         else:
-            self._tensor = x.clone()
+            self._tensor = x.clone().type(torch.FloatTensor)
             return self
 
     def image(self):
