@@ -181,15 +181,14 @@ class SparseTiledMatrix(object):
         ijv = [(i,j,v, (i//n,j//n)) for (i,j,v) in zip(T.row, T.col, T.data)]  # preallocate
         ijv.sort(key=lambda x: x[3])  # in-place sort for groupby, sort only indexes
         d_blockidx_to_entries = {k:sorted(v, key=lambda y: (y[0], y[1])) for (k,v) in groupby(ijv, key=lambda x: x[3])}   # sorted for hash
-        print(len(d_blockidx_to_entries))
         for i in range(0, T.shape[0], n):
+            print('[keynet.SparseTiledMatrix][%d/%d]:  Encoding...' % (i, T.shape[0]))
             for j in range(0, T.shape[1], n):
-                if (i//n,j//n) in d_blockidx_to_entries:
+                if (i//n,j//n) in d_blockidx_to_entries and len(d_blockidx_to_entries[(i//n,j//n)])>0:
                     (rows, cols, vals) = zip(*[(ii-i,jj-j,v) for (ii,jj,v,ul) in d_blockidx_to_entries[(i//n,j//n)]])
                     k = hash((vals, (rows, cols)))
                     if k not in M:
-                        m = scipy.sparse.coo_matrix( (vals, (rows,cols)), shape=(n, n)).todense().astype(np.float32)  # submatrix                                            
-                        M[k] = torch.as_tensor(m)
+                        M[k] = torch.as_tensor(scipy.sparse.coo_matrix( (vals, (rows,cols)), shape=(n, n), dtype=np.float32).todense())  # submatrix 
                 else:
                     k = None
                 B.append( (i//n, j//n, k) )
