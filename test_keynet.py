@@ -305,7 +305,7 @@ def test_keynet_constructor():
     net = keynet.cifar10.AllConvNet()    
     net.load_state_dict(torch.load('./models/cifar10_allconv.pth', map_location=torch.device('cpu')));
     x = torch.randn(1, *inshape)
-    (sensor, knet) = keynet.system.IdentityTiledKeynet(inshape, net, 2048, do_output_encryption=False)    
+    (sensor, knet) = keynet.system.IdentityTiledKeynet(inshape, net, 256, do_output_encryption=False)    
     yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
     assert np.allclose(yh, y, atol=1E-5)    

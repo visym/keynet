@@ -1,6 +1,7 @@
 import numpy as np
 import vipy
 import warnings
+import torch
 from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse, sparse_identity_matrix
 from keynet.sparse import sparse_stochastic_matrix_with_inverse, sparse_permutation_tiled_matrix_with_inverse, sparse_identity_tiled_matrix_with_inverse
 from keynet.sparse import SparseTiledMatrix
