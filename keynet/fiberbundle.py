@@ -65,7 +65,7 @@ def simulation(img_color, fiber_core_x=16, fiber_core_y=16, clad_factor=1.25, sh
         fc_pixels_half_y = math.ceil(fiber_core_y / image_pixel_size / 2)
 
         #initialize matrix of centroids for each block of pixels equal to fiber size
-        centroid = [[0 for x in range(clad_blocks_rows + pad_val)] for y in range(clad_blocks_cols + pad_val)]
+        centroid = [[0 for x in range(clad_blocks_cols + pad_val)] for y in range(clad_blocks_rows + pad_val)]
 
         #shear = 1  #minimum value of 1 here is random from 0-1, maximum is pad_val value (1 = no shear)
         #calculate physical core array center positions and make mask
@@ -73,7 +73,6 @@ def simulation(img_color, fiber_core_x=16, fiber_core_y=16, clad_factor=1.25, sh
             for j in range(clad_blocks_cols):
                 core_pos_pix = [math.ceil(((clad_size_x / 2) + clad_size_x * i) / image_pixel_size + np.random.randint(shear)), math.ceil(((clad_size_y / 2) * ((i + 1) % 2) + clad_size_y * j) / image_pixel_size) + np.random.randint(shear)]
                 centroid[i][j] = [core_pos_pix[0],core_pos_pix[1]]
-                #print (centroid[i][j][1],core_pos_pix[1])
                 for q in range(core_pos_pix[0] - clad_pixels_half_x - 1 , core_pos_pix[0] + clad_pixels_half_x - 1):
                     for x in range(core_pos_pix[1] - clad_pixels_half_y - 1 , core_pos_pix[1] + clad_pixels_half_y - 1):
                         if (np.absolute(core_pos_pix[0] - q) <= (fc_pixels_half_x)) and (np.absolute(core_pos_pix[1] - x) <= (fc_pixels_half_y)):

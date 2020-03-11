@@ -203,8 +203,9 @@ class KeyedAvgpool2d(KeyedLayer):
 
     
 class KeyNet(object):
-    def __init__(self, net, inshape, inkey, f_layername_to_keypair, do_output_encryption=False, backend='scipy', verbose=True):
-
+    def __init__(self, net, inshape, inkey, f_layername_to_keypair, do_output_encryption=False, backend='scipy', verbose=True, n_processes=1):
+        self._n_processes = n_processes
+        
         # Assign layerkeys using provided lambda function
         net.eval()
         netshape = keynet.torch.netshape(net, inshape)
@@ -295,6 +296,10 @@ class KeyNet(object):
         self._imagekey = None
         self._embeddingkey = None        
 
+    def parallel(self, n_processes):
+        self._n_processes = n_processes
+        return self
+    
         
 class IdentityKeynet(KeyNet):
     """keynet.layers.IdentityKeynet class, useful for testing only"""

@@ -11,8 +11,9 @@ import time
 from vipy.util import groupbyasdict
 from keynet.util import random_positive_definite_matrix
 import copy
-from itertools import groupby
-from collections import deque
+from itertools import groupby, product
+import tempfile
+from vipy.util import Stopwatch
 
 
 def sparse_block_diag(mats, format='coo'):
@@ -160,11 +161,11 @@ def sparse_generalized_permutation_block_matrix_with_inverse(n, m, dtype=np.floa
 
     return(A.astype(dtype), Ainv.astype(dtype))
 
-
+        
 class SparseTiledMatrix(object):
-    def __init__(self, tilesize=None, coo_matrix=None, blocktoeplitz=None, shape=None):
+    def __init__(self, tilesize=None, coo_matrix=None, blocktoeplitz=None, shape=None, n_processes=1):
         if coo_matrix is not None:
-            self.from_coomatrix(coo_matrix, tilesize)
+            self.from_coomatrix(coo_matrix, tilesize, n_processes=n_processes)
         elif blocktoeplitz is not None:
             self.from_blocktoeplitz(shape, blocktoeplitz)
         elif shape is not None and tilesize is not None:
@@ -173,7 +174,7 @@ class SparseTiledMatrix(object):
         else:
             raise ValueError('Must provide a constructor')
 
-    def from_coomatrix(self, T, tilesize, verbose=True):
+    def from_coomatrix(self, T, tilesize, verbose=False, n_processes=1):
         """Given a sparse matrix T, split into non-overlapping nxn blocks or 'tiles' of size self._tilesize x self.Blocksize, and return an indexed representation for unique submatrices which provides memory efficient matrix vector multiplication when T is self-similar
         
         Representation
@@ -181,32 +182,33 @@ class SparseTiledMatrix(object):
             M = {k:np.array(), ...} a submatrix dictionary, such that the submatrix for block (i,j)=(B[u][0], B[u][1]) is M[B[u][2]]
         
         """
-
-
-        T = T.tocoo()
-        (B, M, n) = ([], {}, tilesize)
-        ijv = [(i,j,v, (i//n,j//n)) for (i,j,v) in zip(T.row, T.col, T.data)]  # preallocate
-        ijv.sort(key=lambda x: x[3])  # in-place sort for groupby, sort only indexes
-        d_blockidx_to_entries = {k:sorted(v, key=lambda y: (y[0], y[1])) for (k,v) in groupby(ijv, key=lambda x: x[3])}   # sorted for hash
-        B = deque()
-        for i in range(0, T.shape[0], n):
-            for j in range(0, T.shape[1], n):
-                if (i//n, j//n) in d_blockidx_to_entries and len(d_blockidx_to_entries[(i//n,j//n)])>0:
-                    (rows, cols, vals) = zip(*[(ii-i,jj-j,v) for (ii,jj,v,ul) in d_blockidx_to_entries[(i//n,j//n)]])
-                    k = hash((vals, (rows, cols)))
-                    if k not in M:
-                        print('[keynet.SparseTiledMatrix][%d/%d]:  Encoding...' % (i, j))
-                        M[k] = torch.as_tensor(scipy.sparse.coo_matrix( (vals, (rows,cols)), shape=(n, n), dtype=np.float32).todense())  # submatrix 
-                    elif verbose:
-                        print('[keynet.SparseTiledMatrix][%d/%d]:  Repeating...' % (i, j))
-                    B.append( (i//n, j//n, k) )
-
-        self._B = list(B)
-        self._M = M
         self._tilesize = tilesize
         self.dtype = T.dtype
         self.shape = (T.shape[0], T.shape[1])
         self.ndim = 2
+        n = tilesize
+        (H,W) = self.shape
+        
+        T = T.tocoo()
+        ijv = [(i,j,v, (i//n,j//n)) for (i,j,v) in zip(T.row, T.col, T.data)]  # preallocate
+        ijv.sort(key=lambda x: x[3])  # in-place sort for groupby, sort only indexes
+        d_blockidx_to_rows_cols_vals = {k:(tuple(zip(*tuple(v)))[0:3]) for (k,v) in groupby(ijv, key=lambda x: x[3])}
+        
+        # Single process hashing and tiling
+        d = d_blockidx_to_rows_cols_vals
+        (B, M, n) = ([], {}, tilesize)              
+        for (bi, i) in enumerate(range(0, T.shape[0], n)):
+            for (bj, j) in enumerate(range(0, T.shape[1], n)):
+                if (bi, bj) in d and len(d[bi, bj])>0:
+                    (rows, cols, vals) = d[bi, bj]
+                    (blockrows, blockcols) = (np.array(rows)-i, np.array(cols)-j)
+                    k = hash(np.sort(np.hstack( (W*np.array(blockrows)+np.array(blockcols), np.array(vals)) ), axis=0).tostring())
+                    if k not in M:
+                        M[k] = torch.as_tensor(scipy.sparse.coo_matrix( (vals, (blockrows, blockcols)), shape=(n, n), dtype=np.float32).todense())  # submatrix
+                    B.append( (bi, bj, k) )
+
+        self._B = B
+        self._M = M                    
         return self
 
     def from_blocktoeplitz(self, shape, B):
