@@ -2,8 +2,9 @@ import numpy as np
 import vipy
 import warnings
 import torch
-from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse, sparse_identity_matrix
-from keynet.sparse import sparse_stochastic_matrix_with_inverse, sparse_permutation_tiled_matrix_with_inverse, sparse_identity_tiled_matrix_with_inverse
+from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_generalized_permutation_matrix_with_inverse, sparse_generalized_permutation_block_matrix_with_inverse, sparse_identity_matrix
+from keynet.sparse import sparse_stochastic_matrix_with_inverse, sparse_generalized_stochastic_matrix_with_inverse, sparse_permutation_tiled_matrix_with_inverse, sparse_identity_tiled_matrix_with_inverse
+from keynet.sparse import sparse_generalized_stochastic_tiled_matrix_with_inverse
 from keynet.sparse import SparseTiledMatrix
 from keynet.torch import homogenize, dehomogenize
 from keynet.layer import KeyedLayer
@@ -11,8 +12,8 @@ import keynet.fiberbundle
 import PIL
 
 class Keysensor(KeyedLayer):
-    def __init__(self, inshape, encryptkey, decryptkey, backend):
-        super(Keysensor, self).__init__(backend=backend)        
+    def __init__(self, inshape, encryptkey, decryptkey):
+        super(Keysensor, self).__init__()
         self._encryptkey = encryptkey
         self._decryptkey = decryptkey
         self._inshape = inshape
@@ -73,39 +74,44 @@ class Keysensor(KeyedLayer):
 
 
 class IdentityKeysensor(Keysensor):
-    def __init__(self, inshape, backend='scipy'):
+    def __init__(self, inshape):
         (encryptkey, decryptkey) = (sparse_identity_matrix(np.prod(inshape)+1), sparse_identity_matrix(np.prod(inshape)+1))        
-        super(IdentityKeysensor, self).__init__(inshape, encryptkey, decryptkey, backend)
+        super(IdentityKeysensor, self).__init__(inshape, encryptkey, decryptkey)
 
         
 class PermutationKeysensor(Keysensor):
-    def __init__(self, inshape, backend='scipy'):
+    def __init__(self, inshape):
         (encryptkey, decryptkey) = sparse_permutation_matrix_with_inverse(np.prod(inshape)+1)        
-        super(PermutationKeysensor, self).__init__(inshape, encryptkey, decryptkey, backend)
+        super(PermutationKeysensor, self).__init__(inshape, encryptkey, decryptkey)
 
         
 class StochasticKeysensor(Keysensor):
-    def __init__(self, inshape, alpha, backend='scipy'):
-        (encryptkey, decryptkey) = sparse_stochastic_matrix_with_inverse(np.prod(inshape)+1, alpha)
-        super(StochasticKeysensor, self).__init__(inshape, encryptkey, decryptkey, backend)
+    def __init__(self, inshape, alpha, beta=0):
+        (encryptkey, decryptkey) = sparse_generalized_stochastic_matrix_with_inverse(np.prod(inshape)+1, alpha, beta)
+        super(StochasticKeysensor, self).__init__(inshape, encryptkey, decryptkey)
 
 
 class IdentityTiledKeysensor(Keysensor):
     def __init__(self, inshape, tilesize):
         (encryptkey, decryptkey) = sparse_identity_tiled_matrix_with_inverse(np.prod(inshape)+1, tilesize)
-        super(IdentityTiledKeysensor, self).__init__(inshape, encryptkey, decryptkey, backend='tiled')
+        super(IdentityTiledKeysensor, self).__init__(inshape, encryptkey, decryptkey)
 
                                     
 class PermutationTiledKeysensor(Keysensor):
     def __init__(self, inshape, tilesize):
         (encryptkey, decryptkey) = sparse_permutation_tiled_matrix_with_inverse(np.prod(inshape)+1, tilesize)
-        super(PermutationTiledKeysensor, self).__init__(inshape, encryptkey, decryptkey, backend='tiled')
+        super(PermutationTiledKeysensor, self).__init__(inshape, encryptkey, decryptkey)
+
+class StochasticTiledKeysensor(Keysensor):
+    def __init__(self, inshape, tilesize, alpha, beta=0):
+        (encryptkey, decryptkey) = sparse_generalized_stochastic_tiled_matrix_with_inverse(np.prod(inshape)+1, tilesize, alpha, beta)
+        super(StochasticTiledKeysensor, self).__init__(inshape, encryptkey, decryptkey)
         
         
 class OpticalFiberBundle(Keysensor):
     def __init__(self, inshape):
         (encryptkey, decryptkey) = (sparse_identity_matrix(np.prod(inshape)+1), sparse_identity_matrix(np.prod(inshape)+1))
-        super(OpticalFiberBundle, self).__init__(inshape, encryptkey, decryptkey, backend='scipy')
+        super(OpticalFiberBundle, self).__init__(inshape, encryptkey, decryptkey)
     
     def load(self, imgfile):
         img_color = vipy.image.Image(imgfile).maxdim(max(self._inshape)).centercrop(height=self._inshape[1], width=self._inshape[2]).numpy()

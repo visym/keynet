@@ -24,6 +24,7 @@ import vipy
 from vipy.util import Stopwatch
 import keynet.system
 
+
 def test_torch_homogenize():
     (N,C,U,V) = (2,2,3,3)
     x = torch.tensor(np.random.rand( N,C,U,V ).astype(np.float32))    
@@ -109,7 +110,7 @@ def show_sparse_blockkey(n=32):
     return im.array(np.hstack( (im.array(), im_keyed.array()) )).show()
 
 
-def test_sparse_tiled_matrix():
+def test_sparse_tiled_matrix():    
     (U,V) = (8,8)
     W = keynet.torch.sparse_toeplitz_conv2d( (1,U,V), np.random.rand(1,1,3,3) )    
     T = keynet.sparse.SparseTiledMatrix(coo_matrix=W, tilesize=4)
@@ -121,48 +122,30 @@ def test_sparse_tiled_matrix():
     x = torch.tensor(img.reshape(1,U,V))
 
     W_right = keynet.torch.sparse_toeplitz_conv2d( (1,U,V), np.random.rand(1,1,3,3) )
-    W_left = W_right.transpose()
     W_right_dense = W_right.todense()
-    W_left_dense = W_left.todense()    
     
     T_right = keynet.sparse.SparseTiledMatrix(coo_matrix=W_right, tilesize=U*4)
-    T_left = T_right.clone().transpose()
     x_torch = homogenize(x)
     x_numpy = x_torch.numpy()
 
-    with Stopwatch() as sw:
-        y = x_numpy.dot(W_left_dense)  
-    print('[test_block_tiled]: timing analysis')
-    print('elapsed numpy: %f s' % sw.elapsed)
-    with Stopwatch() as sw:
-        yh = T_left.leftdot(x_torch)
-    print('elapsed leftdot tiled: %f s' % sw.elapsed)
-    assert np.allclose(y.flatten(), yh.flatten().numpy(), atol=1E-5)
-    assert np.allclose(W_left_dense.flatten(), T_left.tocoo().todense().flatten(), atol=1E-5)
-
     yh = T_right.dot(x_torch.t())  # right multiply
     y = W_right_dense.dot(x_numpy.transpose())
-    assert np.allclose(y.flatten(), yh.flatten().numpy(), atol=1E-5)    
+    assert np.allclose(y.flatten(), yh.flatten(), atol=1E-5)    
     
     W2_right = keynet.torch.sparse_toeplitz_conv2d( (1,U,V), np.random.rand(1,1,3,3) )
     T2_right = keynet.sparse.SparseTiledMatrix(coo_matrix=W2_right, tilesize=T_right.tilesize())    
     T_right.prod(T2_right)
     y = W_right_dense.dot(W2_right.todense()).dot(x_numpy.transpose())
     yh = T_right.dot(x_torch.t())
-    assert np.allclose(y.flatten(), yh.flatten().numpy())
+    assert np.allclose(y.flatten(), yh.flatten())
 
-    x1 = torch.tensor(np.random.rand(10,1))
+    x1 = torch.tensor(np.random.rand(10,1).astype(np.float32))
     T1 = keynet.sparse.SparseTiledMatrix(shape=(10,10), blocktoeplitz=np.random.rand(3,3))
     W1 = T1.tocoo().todense()
     assert np.allclose(W1.dot(x1).flatten(), T1.dot(x1).flatten(), atol=1E-5)
 
-    x1 = torch.tensor(np.random.rand(1,10))
-    T1 = keynet.sparse.SparseTiledMatrix(shape=(10,10), blocktoeplitz=np.random.rand(3,3))
-    W1 = T1.tocoo().todense()
-    assert np.allclose(np.array(x1).dot(W1.transpose()).flatten(), T1.transpose().leftdot(x1).flatten(), atol=1E-5)
-    
-    T1 = keynet.sparse.SparseTiledMatrix(tilesize=(3), coo_matrix=scipy.sparse.coo_matrix(np.random.rand(9,10)))
-    T2 = keynet.sparse.SparseTiledMatrix(tilesize=(3), coo_matrix=scipy.sparse.coo_matrix(np.random.rand(10,11)))    
+    T1 = keynet.sparse.SparseTiledMatrix(tilesize=3, coo_matrix=scipy.sparse.coo_matrix(np.random.rand(9,10)))
+    T2 = keynet.sparse.SparseTiledMatrix(tilesize=3, coo_matrix=scipy.sparse.coo_matrix(np.random.rand(10,11)))    
     W1 = T1.tocoo().todense()
     W2 = T2.tocoo().todense()
     assert np.allclose(W1.dot(W2).flatten(), T1.prod(T2).tocoo().todense().flatten(), atol=1E-5)
@@ -172,7 +155,20 @@ def test_sparse_tiled_matrix():
     W1 = T1.tocoo().todense()
     W2 = T2.tocoo().todense()
     assert np.allclose(W1.dot(W2).flatten(), T1.prod(T2).tocoo().todense().flatten(), atol=1E-5)
-                               
+
+    T3 = keynet.sparse.SparseTiledMatrix(coo_matrix=T1.tocoo(), tilesize=3)
+    assert len(T3.tiles()) == 2  
+
+    T2 = keynet.sparse.SparseTiledMatrix(coo_matrix=W2_right.astype(np.float32), tilesize=3)
+    T1 = keynet.sparse.SparseTiledMatrix(shape=(T2.shape), blocktoeplitz=np.random.rand(3,3).astype(np.float32))
+    T3 = keynet.sparse.SparseTiledMatrix(shape=(T2.shape), blocktoeplitz=np.random.rand(3,3).astype(np.float32))
+    assert T1.shape == T1.tocoo().shape
+    assert T2.shape == T2.tocoo().shape        
+    assert T3.shape == T3.tocoo().shape
+
+    T4 = (T1.clone().prod(T2)).prod(T3)
+    assert np.allclose(T4.tocoo().todense().flatten(), T1.tocoo().todense().dot(T2.tocoo().todense().dot(T3.tocoo().todense())).flatten(), atol=1E-5)
+    
     print('[test_block_tiled]:  PASSED')
     
 
@@ -269,7 +265,6 @@ def _test_semantic_security():
 
 
 def test_keynet_constructor():
-
     inshape = (1,28,28)
     x = torch.randn(1, *inshape)
     net = keynet.mnist.LeNet_AvgPool()
@@ -277,12 +272,14 @@ def test_keynet_constructor():
 
     (sensor, knet) = keynet.system.IdentityTiledKeynet(inshape, net, 27, do_output_encryption=False)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    knet.num_parameters()
     print('[test_keynet_constructor]:  IdentityTiledKeynet PASSED')
-    
+        
     (sensor, knet) = keynet.system.PermutationTiledKeynet(inshape, net, 27, do_output_encryption=False)
     yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    knet.num_parameters()    
     print('[test_keynet_constructor]:  PermutationTiledKeynet PASSED')
     
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)
@@ -313,8 +310,6 @@ def test_keynet_constructor():
     
     
 def test_keynet_mnist():
-    raise ValueError('FIXME')
-    
     torch.set_grad_enabled(False)
     np.random.seed(0)
     X = [torch.tensor(np.random.rand(1,1,28,28).astype(np.float32)) for j in range(0,16)]
@@ -324,11 +319,10 @@ def test_keynet_mnist():
     net.load_state_dict(torch.load('./models/mnist_lenet.pth'))
     net.eval()
     with Stopwatch() as sw:
+        y = [net(x) for x in X]        
         y = [net(x) for x in X]
-    with Stopwatch() as sw:
-        y = [net(x) for x in X]
-    print('Elapsed: %f sec' % (sw.elapsed/len(X)))
-    print('LeNet parameters: %d' % keynet.torch.count_parameters(net))
+    print('[test_keynet_mnist]: Elapsed: %f sec' % (sw.elapsed/(2*len(X))))
+    print('[test_keynet_mnist]: LeNet parameters: %d' % keynet.torch.count_parameters(net))
 
     # LeNet-AvgPool
     net = keynet.mnist.LeNet_AvgPool()
@@ -336,97 +330,46 @@ def test_keynet_mnist():
     net.eval()
     with Stopwatch() as sw:
         y = [net(x) for x in X]
-    print('Elapsed: %f sec' % (sw.elapsed/len(X)))
-    print('LeNet_AvgPool parameters: %d' % keynet.torch.count_parameters(net))
+    print('[test_keynet_mnist]: Elapsed: %f sec' % (sw.elapsed/len(X)))
+    print('[test_keynet_mnist]: LeNet_AvgPool parameters: %d' % keynet.torch.count_parameters(net))
 
     # Identity KeyNet
-    A0 = sparse_identity_matrix(28*28*1 + 1)
-    A0inv = A0
-    knet = keynet.mnist.Key_LeNet_AvgPool()
-    knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
-    knet.eval()    
-    yh_identity = knet.decrypt(knet(knet.encrypt(A0, X[0])))
-    assert(np.allclose(np.array(y[0]), np.array(yh_identity)))
-    print('MNIST IdentityKeyLeNet: passed')
-    print('IdentityKeyLeNet parameters: %d' % keynet.torch.count_keynet_parameters(knet))
+    inshape = (1,28,28)
+    (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)    
+    yh_identity = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
+    assert(np.allclose(np.array(y[0]), yh_identity))
+    print('[test_keynet_mnist]:  IdentityKeynet: passed')
+    print('[test_keynet_mnist]:  IdentityKey parameters: %d' % knet.num_parameters())
 
+    # IdentityTiled keynet
+    inshape = (1,28,28)
+    (sensor, knet) = keynet.system.IdentityTiledKeynet(inshape, net, tilesize=32)    
+    yh_identity = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
+    assert(np.allclose(np.array(y[0]), yh_identity))
+    print('[test_keynet_mnist]:  IdentityTiledKeynet: passed')
+    print('[test_keynet_mnist]:  IdentityTiledKey parameters: %d' % knet.num_parameters())
+    
     # Permutation KeyLeNet
-    A0 = sparse_permutation_matrix(28*28*1 + 1)
-    A0inv = A0.transpose()
-    knet = keynet.mnist.PermutationKey_LeNet_AvgPool()
-    knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
-    knet.eval()    
-    yh_permutation = knet.decrypt(knet(knet.encrypt(A0, X[0])))
-    fc3_permutation = knet.fc3.What
-    assert(np.allclose(np.array(y[0]), np.array(yh_permutation)))
-    print('MNIST PermutationKeyLeNet: passed')
-    print('PermutationKeyLeNet parameters: %d' % keynet.torch.count_keynet_parameters(knet))
+    (sensor, knet) = keynet.system.PermutationTiledKeynet(inshape, net, tilesize=32)    
+    yh = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
+    assert(np.allclose(np.array(y[0]), yh))
+    print('[test_keynet_mnist]:  PermutationTiledKeynet: passed')
+    print('[test_keynet_mnist]:  PermutationTiledKey parameters: %d' % knet.num_parameters())
 
-    # Diagonal KeyLeNet
-    A0 = sparse_diagonal_matrix(28*28*1 + 1)
-    A0inv = sparse_inverse_diagonal_matrix(A0)
-    knet = keynet.mnist.DiagonalKey_LeNet_AvgPool()
-    knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
-    knet.eval()    
-    yh_diagonal = knet.decrypt(knet(knet.encrypt(A0, X[0])))
-    fc3_diagonal = knet.fc3.What
-    assert(np.allclose(np.array(y[0]), np.array(yh_diagonal)))
-    print('MNIST DiagonalKeyLeNet: passed')
-    print('DiagonalKeyLeNet parameters: %d' % keynet.torch.count_keynet_parameters(knet))
+    # Stochastic
+    (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=2, beta=2)    
+    yh = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
+    assert(np.allclose(np.array(y[0]), yh))
+    print('[test_keynet_mnist]:  StochasticKeynet: passed')
+    print('[test_keynet_mnist]:  StochasticKeynet parameters: %d' % knet.num_parameters())
 
-    # Diagonal vs. Permutation KeyLeNet (fc3 What comparison)
-    assert(not np.allclose(np.array(fc3_permutation), np.array(fc3_diagonal)))
-    print('MNIST PermutationKeyLeNet vs. DiagonalKeyLeNet: passed')
-
-    # Stochastic KeyLeNet
-    A0 = sparse_diagonal_matrix(28*28*1 + 1)
-    A0inv = sparse_inverse_diagonal_matrix(A0)
-    knet = keynet.mnist.StochasticKey_LeNet_AvgPool()
-    knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
-    knet.eval()    
-    yh_stochastic = knet.decrypt(knet(knet.encrypt(A0, X[0])))
-    assert(np.allclose(np.array(y[0]), np.array(yh_stochastic)))
-    print('MNIST StochasticKeyLeNet: passed')
-    print('StochasticKeyLeNet parameters: %d' % keynet.torch.count_keynet_parameters(knet))
-
-    # Block KeyLeNet
-    # FIXME: nomenclature for "block" here
-    #for alpha in [1,2,4]:
-    #    A0 = sparse_diagonal_matrix(28*28*1 + 1)
-    #    A0inv = sparse_inverse_diagonal_matrix(A0)
-    #    knet = keynet.mnist.BlockKeyLeNet(alpha=alpha)
-    #    knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
-    #    knet.eval()    
-    #    Xh = [knet.encrypt(A0, x) for x in X]
-    #    with Stopwatch() as sw:
-    #        yh_stochastic = [knet.decrypt(knet(xh)) for xh in Xh]
-    #    with Stopwatch() as sw:
-    #        yh_stochastic = [knet.decrypt(knet(xh)) for xh in Xh]
-    #    print('Elapsed: %f sec' % (sw.elapsed/len(X)))
-    #    print(y[0])
-    #    print(yh_stochastic[0])
-    #    assert(np.allclose(np.array(y[0]), np.array(yh_stochastic[0]), atol=1E-1))
-    #    print('MNIST BlockKeyLeNet (alpha=%d): passed' % alpha)
-    #    print('BlockKeyLeNet (alpha=%d) parameters: %d' % (alpha, keynet.torch.count_keynet_parameters(knet)))
-
-    # Generalized Stochastic KeyLeNet
-    # FIXME: the number of parameters isn't quite right here due to a boundary condition on keynet.util.sparse_random_diagonally_dominant_doubly_stochastic_matrix
-    for alpha in [1,2,4]:
-        A0 = sparse_diagonal_matrix(28*28*1 + 1)
-        A0inv = sparse_inverse_diagonal_matrix(A0)
-        knet = keynet.mnist.GeneralizedStochasticKey_LeNet_AvgPool(alpha=alpha)
-        knet.load_state_dict_keyed(torch.load('./models/mnist_lenet_avgpool.pth'), A0inv=A0inv)
-        knet.eval()    
-        Xh = [knet.encrypt(A0, x) for x in X]
-        with Stopwatch() as sw:
-            yh_stochastic = [knet.decrypt(knet(xh)) for xh in Xh]
-        with Stopwatch() as sw:
-            yh_stochastic = [knet.decrypt(knet(xh)) for xh in Xh]
-        print('Elapsed: %f sec' % (sw.elapsed/len(X)))
-        assert(np.allclose(np.array(y[0]), np.array(yh_stochastic[0]), atol=1E-4))
-        print('MNIST GeneralizedStochasticKeyLeNet (alpha=%d): passed' % alpha)
-        print('GeneralizedStochasticKeyLeNet (alpha=%d) parameters: %d' % (alpha, keynet.torch.count_keynet_parameters(knet)))
-
+    # Stochastic Tiled
+    (sensor, knet) = keynet.system.StochasticTiledKeynet(inshape, net, alpha=2, beta=2, tilesize=32)    
+    yh = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
+    assert(np.allclose(np.array(y[0]), yh))
+    print('[test_keynet_mnist]:  StochasticTiledKeynet: passed')
+    print('[test_keynet_mnist]:  StochasticTiledKeynet parameters: %d' % knet.num_parameters())    
+    return 
 
     
 def test_keynet_cifar10():
@@ -470,15 +413,76 @@ def test_keynet_cifar10():
         print('AllConvNet parameters: %d' % keynet.torch.count_parameters(net))
         print('StochasticKeyNet (alpha=%d) parameters: %d' % (alpha, keynet.torch.count_keynet_parameters(knet)))
     
-    
 
+def test_sparse_matrix():
+
+    W_numpy = np.random.rand(3,3).astype(np.float32)
+    x_numpy = np.random.rand(3,1).astype(np.float32)
+    y = W_numpy.dot(x_numpy)
+    
+    W_torch = torch.as_tensor(W_numpy)
+    x_torch = torch.as_tensor(x_numpy)
+
+    W_torch_sparse = keynet.torch.scipy_coo_to_torch_sparse(scipy.sparse.coo_matrix(W_numpy))    
+    W_scipy = scipy.sparse.coo_matrix(W_numpy)
+    
+    A = keynet.sparse.SparseMatrix(W_numpy, backend='scipy')
+    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
+    assert np.allclose(A.dot(x_torch), y, atol=1E-5)    
+    A = keynet.sparse.SparseMatrix(W_torch, backend='scipy')
+    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
+    assert np.allclose(A.dot(x_torch), y, atol=1E-5)        
+    A = keynet.sparse.SparseMatrix(W_torch_sparse, backend='scipy')
+    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
+    assert np.allclose(A.dot(x_torch), y, atol=1E-5)        
+    A = keynet.sparse.SparseMatrix(W_scipy, backend='scipy')
+    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
+    assert np.allclose(A.dot(x_torch), y, atol=1E-5)        
+
+    A = keynet.sparse.SparseMatrix(W_numpy, backend='torch')
+    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
+    assert np.allclose(A.dot(x_torch), y, atol=1E-5)        
+    A = keynet.sparse.SparseMatrix(W_torch, backend='torch')
+    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
+    assert np.allclose(A.dot(x_torch), y, atol=1E-5)        
+    A = keynet.sparse.SparseMatrix(W_torch_sparse, backend='torch')
+    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
+    assert np.allclose(A.dot(x_torch), y, atol=1E-5)        
+    A = keynet.sparse.SparseMatrix(W_scipy, backend='torch')
+    assert np.allclose(A.dot(x_numpy), y, atol=1E-5) 
+    assert np.allclose(A.dot(x_torch), y, atol=1E-5)       
+
+    A = keynet.sparse.SparseMatrix(W_scipy, backend='torch.sparse')
+    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
+    assert np.allclose(A.dot(x_torch), y, atol=1E-5)    
+    A = keynet.sparse.SparseMatrix(W_numpy, backend='torch.sparse')
+    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
+    assert np.allclose(A.dot(x_torch), y, atol=1E-5)        
+    A = keynet.sparse.SparseMatrix(W_torch_sparse, backend='torch.sparse')
+    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
+    assert np.allclose(A.dot(x_torch), y, atol=1E-5)        
+    print('[test_sparse_matrix]: SparseMatrix PASSED')
+
+    W_tiled = keynet.sparse.SparseTiledMatrix(blocktoeplitz=W_numpy, shape=(3,3), backend='scipy')
+    assert np.allclose(W_tiled.dot(x_numpy), y, atol=1E-5)
+    assert np.allclose(W_tiled.dot(x_torch), y, atol=1E-5)        
+    W_tiled = keynet.sparse.SparseTiledMatrix(blocktoeplitz=W_numpy, shape=(3,3), backend='torch.sparse')    
+    assert np.allclose(W_tiled.dot(x_numpy), y, atol=1E-5)
+    assert np.allclose(W_tiled.dot(x_torch), y, atol=1E-5)        
+
+    W_tiled = keynet.sparse.SparseTiledMatrix(blocktoeplitz=W_numpy, shape=(4,5), backend='scipy')
+    assert W_tiled.dot(np.random.rand(5,1)).shape == (4,1)
+    print('[test_sparse_matrix]: SparseTiledMatrix PASSED')
+    
+    
 if __name__ == '__main__':
-    test_torch_homogenize()
-    test_sparse_toeplitz_conv2d()
-    test_sparse_toeplitz_avgpool2d()
-    test_sparse_tiled_matrix()    
+    #test_torch_homogenize()
+    #test_sparse_toeplitz_conv2d()
+    #test_sparse_toeplitz_avgpool2d()
+    #test_sparse_tiled_matrix()    
     #test_keynet_mnist()
     #test_keynet_cifar10()
     #test_semantic_security()
-    test_blockview()
-    test_keynet_constructor()    
+    #test_blockview()
+    test_keynet_constructor()
+    #test_sparse_matrix()

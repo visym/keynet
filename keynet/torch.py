@@ -16,14 +16,6 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
-def count_keynet_parameters(model):
-    """Hacky method to count total number of key-net sparse parameters"""
-    try:
-        return np.sum([getattr(model, layername).What.nnz if hasattr(getattr(model, layername).What, 'nnz') else getattr(model, layername).What.numel() for layername in dir(model) if hasattr(getattr(model, layername), 'What') and getattr(model, layername).What is not None])
-    except:
-        return np.sum([getattr(model, layername).What.nnz if hasattr(getattr(model, layername).What, 'nnz') else getattr(model, layername).What.size for layername in dir(model) if hasattr(getattr(model, layername), 'What') and getattr(model, layername).What is not None])
-
-
 def netshape(net, inshape):
     """Pass a dummy input into the network and retrieve the input and output shapes of all layers.  Requires named modules, and inplace layers might screw this up"""
     d_modulename_to_shape = OrderedDict()
@@ -160,7 +152,12 @@ def scipy_coo_to_torch_sparse(coo, device='cpu'):
     else:
         with torch.cuda.device(device):
             return torch.sparse.FloatTensor(i, v, torch.Size(shape)).cuda(device)
-    
+
+
+def torch_sparse_to_scipy_coo(t):
+    """https://stackoverflow.com/questions/50665141/converting-a-scipy-coo-matrix-to-pytorch-sparse-tensor"""
+    raise
+        
 
 def fuse_conv2d_and_bn(conv2d_weight, conv2d_bias, bn_running_mean, bn_running_var, bn_eps, bn_weight, bn_bias):
     """https://discuss.pytorch.org/t/how-to-absorb-batch-norm-layer-weights-into-convolution-layer-weights/16412/4"""
