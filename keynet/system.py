@@ -15,6 +15,7 @@ from keynet.sparse import sparse_permutation_tiled_matrix_with_inverse, SparseTi
 from keynet.sparse import sparse_generalized_stochastic_tiled_matrix_with_inverse
 import keynet.torch
 import keynet.layer
+import keynet.fiberbundle
 
 
 class KeyedModel(object):
@@ -178,9 +179,9 @@ class KeyedSensor(keynet.layer.KeyedLayer):
 
     
 class OpticalFiberBundle(KeyedSensor):
-    def __init__(self, inshape, keypair):
-        (encryptkey, decryptkey) = keypair        
-        super(OpticalFiberBundle, self).__init__(inshape, encryptkey, decryptkey)
+    def __init__(self, inshape=(3,512,512), keypair=None):
+        (encryptkey, decryptkey) = keypair if keypair is not None else keygen('identity', 'scipy')('input', inshape)      
+        super(OpticalFiberBundle, self).__init__(inshape, (encryptkey, decryptkey))
     
     def load(self, imgfile):
         img_color = vipy.image.Image(imgfile).maxdim(max(self._inshape)).centercrop(height=self._inshape[1], width=self._inshape[2]).numpy()
@@ -232,13 +233,13 @@ def keygen(format, backend, alpha=None, beta=0, tilesize=None):
     elif format == 'tiled-stochastic' and backend == 'scipy':
         assert tilesize is not None, "invalid tilesize"
         assert alpha is not None and beta is not None, "Invalid (alpha, beta)"
-        f_keypair = lambda layername, outshape: sparse_generalized_stochastic_tiled_matrix_with_inverse(np.prod(outshape)+1, alpha, beta) if 'relu' not in layername else \
-                                                sparse_generalized_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, beta)
+        f_keypair = lambda layername, outshape: sparse_generalized_stochastic_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, alpha, beta) if 'relu' not in layername else \
+                                                sparse_generalized_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, beta)
     elif format == 'tiled-stochastic' and backend == 'torch':
         assert tilesize is not None, "invalid tilesize"
         assert alpha is not None and beta is not None, "Invalid (alpha, beta)"
-        f_keypair = lambda layername, outshape: sparse_generalized_stochastic_tiled_matrix_with_inverse(np.prod(outshape)+1, alpha, beta, tiler=keynet.torch.SparseTiledMatrix) if 'relu' not in layername else \
-                                                sparse_generalized_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, beta, tiler=keynet.torch.SparseTiledMatrix)   
+        f_keypair = lambda layername, outshape: sparse_generalized_stochastic_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, alpha, beta, tiler=keynet.torch.SparseTiledMatrix) if 'relu' not in layername else \
+                                                sparse_generalized_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, beta, tiler=keynet.torch.SparseTiledMatrix)   
     return f_keypair
         
     
@@ -271,6 +272,11 @@ def PermutationTiledKeynet(inshape, net, tilesize, do_output_encryption=False):
 
 def StochasticTiledKeynet(inshape, net, tilesize, alpha, beta=0, do_output_encryption=False):
     return Keynet(inshape, net, 'tiled-stochastic', 'scipy', do_output_encryption, tilesize=tilesize, alpha=alpha, beta=beta)
+
+
+def StochasticTiledKeySensor(inshape, tilesize, alpha, beta=0):
+    f_keypair = keygen('tiled-stochastic', 'scipy', alpha, beta, tilesize)
+    return KeyedSensor(inshape, f_keypair('input', inshape))
 
 
 def OpticalFiberBundleKeynet(inshape, net):
