@@ -432,16 +432,16 @@ def test_sparse_matrix():
     W_torch_sparse = keynet.torch.scipy_coo_to_torch_sparse(scipy.sparse.coo_matrix(W_numpy))    
     W_scipy = scipy.sparse.coo_matrix(W_numpy)
     
-    A = keynet.sparse.SparseMatrixScipy(W_numpy)
+    A = keynet.sparse.SparseMatrix(W_numpy)
     assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
     assert np.allclose(A.torchdot(x_torch).numpy(), y, atol=1E-5)
 
-    A = keynet.sparse.SparseMatrixScipy(W_scipy)
+    A = keynet.sparse.SparseMatrix(W_scipy)
     A = A.from_scipy_sparse(W_scipy)
     assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
     assert np.allclose(A.torchdot(x_torch).numpy(), y, atol=1E-5)
     
-    A = keynet.sparse.SparseMatrixTorch(W_torch)
+    A = keynet.torch.SparseMatrix(W_torch)
     assert np.allclose(A.dot(x_torch).numpy(), y, atol=1E-5)
     assert np.allclose(A.torchdot(x_torch).numpy(), y, atol=1E-5)
 
@@ -449,13 +449,13 @@ def test_sparse_matrix():
 
     
 if __name__ == '__main__':
-    #test_torch_homogenize()
-    #test_sparse_toeplitz_conv2d()
-    #test_sparse_toeplitz_avgpool2d()
+    test_torch_homogenize()
+    test_sparse_toeplitz_conv2d()
+    test_sparse_toeplitz_avgpool2d()
     #test_keynet_mnist()
     #test_keynet_cifar10()
     #test_semantic_security()
-    #test_blockview()
+    test_blockview()
+    test_sparse_matrix()
+    test_sparse_tiled_matrix()        
     test_keynet_constructor()
-    #test_sparse_matrix()
-    #test_sparse_tiled_matrix()        
