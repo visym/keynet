@@ -16,31 +16,32 @@ import vipy
 class KeyedLayer(nn.Module):
     def __init__(self, W=None):
         super(KeyedLayer, self).__init__()        
-        self.W = SparseMatrix(W) if W is not None else None
+        self.W = W if W is not None else None
 
     def forward(self, x_affine):
-        assert self.W is not None, "Invalid KeyedLayer - Must call self.key() first"
-        return self.W.dot(x_affine.t()).t()  # FIXME
+        assert self.W is not None, "Layer not keyed"        
+        assert isinstance(self.W, SparseMatrix), "Layer not keyed"
+        return self.W.torchdot(x_affine.t()).t()
         
     def key(self, W, A, Ainv):
+        assert isinstance(A, SparseMatrix) or isinstance(Ainv, SparseMatrix), "Invalid input"
         if W is not None and A is not None and A is not None:
-            B = SparseMatrix(A)
-            self.W = B.matmul(W).matmul(Ainv)
+            Wh = A.from_scipy_sparse(W) if A.is_scipy_sparse(W) else A.from_torch_dense(W)
+            self.W = A.matmul(Wh).matmul(Ainv)
         elif W is not None and A is not None:
-            B = SparseMatrix(A)            
-            self.W = B.matmul(W)
-        elif W is not None and Ainv is not None: 
-            Binv = SparseMatrix(Ainv)
-            W = SparseMatrix(W)
-            self.W = Binv.transpose().matmul(W.transpose()).transpose()
+            Wh = A.from_scipy_sparse(W) if A.is_scipy_sparse(W) else A.from_torch_dense(W)            
+            self.W = A.matmul(Wh)
+        elif W is not None and Ainv is not None:
+            Wh = Ainv.from_scipy_sparse(W) if Ainv.is_scipy_sparse(W) else Ainv.from_torch_dense(W)                        
+            self.W = Wh.matmul(Ainv)
         elif W is None and Ainv is not None and A is not None:
-            B = SparseMatrix(A)                        
-            self.W = B.matmul(Ainv)
+            self.W = A.matmul(Ainv)
         else:
             raise ValueError('Invalid key')
         return self
 
     def nnz(self):
+        assert self.W is not None, "Layer not keyed"
         return self.W.nnz()
 
     

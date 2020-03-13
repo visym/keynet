@@ -120,41 +120,42 @@ def test_sparse_tiled_matrix():
     im = vipy.image.Image('owl.jpg').resize(U,V).grey()
     img = im.tonumpy()
     x = torch.tensor(img.reshape(1,U,V))
-
-    W_right = keynet.torch.sparse_toeplitz_conv2d( (1,U,V), np.random.rand(1,1,3,3) )
-    W_right_dense = W_right.todense()
-    
-    T_right = keynet.sparse.SparseTiledMatrix(coo_matrix=W_right, tilesize=U*4)
     x_torch = homogenize(x)
     x_numpy = x_torch.numpy()
+    W_right = keynet.torch.sparse_toeplitz_conv2d( (1,U,V), np.random.rand(1,1,3,3) )
+    W_right_dense = W_right.todense()    
 
-    yh = T_right.dot(x_torch.t())  # right multiply
+    T_right = keynet.sparse.SparseTiledMatrix(coo_matrix=W_right, tilesize=U*4)
+    yh = T_right.torchdot(x_torch.t())  # right multiply
     y = W_right_dense.dot(x_numpy.transpose())
     assert np.allclose(y.flatten(), yh.flatten(), atol=1E-5)    
-    
-    W2_right = keynet.torch.sparse_toeplitz_conv2d( (1,U,V), np.random.rand(1,1,3,3) )
-    T2_right = keynet.sparse.SparseTiledMatrix(coo_matrix=W2_right, tilesize=T_right.tilesize())    
-    T_right.prod(T2_right)
-    y = W_right_dense.dot(W2_right.todense()).dot(x_numpy.transpose())
-    yh = T_right.dot(x_torch.t())
-    assert np.allclose(y.flatten(), yh.flatten())
 
     x1 = torch.tensor(np.random.rand(10,1).astype(np.float32))
     T1 = keynet.sparse.SparseTiledMatrix(shape=(10,10), blocktoeplitz=np.random.rand(3,3))
     W1 = T1.tocoo().todense()
-    assert np.allclose(W1.dot(x1).flatten(), T1.dot(x1).flatten(), atol=1E-5)
-
+    assert np.allclose(W1.dot(x1).flatten(), T1.torchdot(x1).flatten(), atol=1E-5)
+    
+    T_right = keynet.sparse.SparseTiledMatrix(coo_matrix=W_right, tilesize=U*4)    
+    assert np.allclose(T_right.tocoo().todense().flatten(), W_right.todense().flatten(), atol=1E-5)
+    
     T1 = keynet.sparse.SparseTiledMatrix(tilesize=3, coo_matrix=scipy.sparse.coo_matrix(np.random.rand(9,10)))
     T2 = keynet.sparse.SparseTiledMatrix(tilesize=3, coo_matrix=scipy.sparse.coo_matrix(np.random.rand(10,11)))    
     W1 = T1.tocoo().todense()
     W2 = T2.tocoo().todense()
-    assert np.allclose(W1.dot(W2).flatten(), T1.prod(T2).tocoo().todense().flatten(), atol=1E-5)
+    assert np.allclose(W1.dot(W2).flatten(), T1.matmul(T2).tocoo().todense().flatten(), atol=1E-5)
+        
+    W2_right = keynet.torch.sparse_toeplitz_conv2d( (1,U,V), np.random.rand(1,1,3,3) )
+    T2_right = keynet.sparse.SparseTiledMatrix(coo_matrix=W2_right, tilesize=T_right.tilesize())    
+    T_tight = T_right.matmul(T2_right)
+    y = W_right_dense.dot(W2_right.todense()).dot(x_numpy.transpose())
+    yh = T_right.torchdot(x_torch.t()).numpy()
+    assert np.allclose(y.flatten(), yh.flatten(), atol=1E-5)
     
     T1 = keynet.sparse.SparseTiledMatrix(shape=(10,10), blocktoeplitz=np.random.rand(3,3))
     T2 = keynet.sparse.SparseTiledMatrix(shape=(10,10), blocktoeplitz=np.random.rand(3,3))    
     W1 = T1.tocoo().todense()
     W2 = T2.tocoo().todense()
-    assert np.allclose(W1.dot(W2).flatten(), T1.prod(T2).tocoo().todense().flatten(), atol=1E-5)
+    assert np.allclose(W1.dot(W2).flatten(), T1.matmul(T2).tocoo().todense().flatten(), atol=1E-5)
 
     T3 = keynet.sparse.SparseTiledMatrix(coo_matrix=T1.tocoo(), tilesize=3)
     assert len(T3.tiles()) == 2  
@@ -166,7 +167,7 @@ def test_sparse_tiled_matrix():
     assert T2.shape == T2.tocoo().shape        
     assert T3.shape == T3.tocoo().shape
 
-    T4 = (T1.clone().prod(T2)).prod(T3)
+    T4 = T1.clone().matmul(T2).matmul(T3)
     assert np.allclose(T4.tocoo().todense().flatten(), T1.tocoo().todense().dot(T2.tocoo().todense().dot(T3.tocoo().todense())).flatten(), atol=1E-5)
     
     print('[test_block_tiled]:  PASSED')
@@ -270,18 +271,6 @@ def test_keynet_constructor():
     net = keynet.mnist.LeNet_AvgPool()
     net.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'));
 
-    (sensor, knet) = keynet.system.IdentityTiledKeynet(inshape, net, 27, do_output_encryption=False)
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
-    knet.num_parameters()
-    print('[test_keynet_constructor]:  IdentityTiledKeynet PASSED')
-        
-    (sensor, knet) = keynet.system.PermutationTiledKeynet(inshape, net, 27, do_output_encryption=False)
-    yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
-    y = net.forward(x).detach().numpy().flatten()
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
-    knet.num_parameters()    
-    print('[test_keynet_constructor]:  PermutationTiledKeynet PASSED')
-    
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet_constructor]:  IdentityKeynet PASSED')
@@ -297,6 +286,19 @@ def test_keynet_constructor():
     (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=2, do_output_encryption=False)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet_constructor]:  StochasticKeynet (alpha=2) PASSED')    
+    
+    (sensor, knet) = keynet.system.IdentityTiledKeynet(inshape, net, 27)
+    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    knet.num_parameters()
+    print('[test_keynet_constructor]:  IdentityTiledKeynet PASSED')
+        
+    (sensor, knet) = keynet.system.PermutationTiledKeynet(inshape, net, 27, do_output_encryption=False)
+    yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
+    y = net.forward(x).detach().numpy().flatten()
+    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    knet.num_parameters()    
+    print('[test_keynet_constructor]:  PermutationTiledKeynet PASSED')
+    
     
     inshape = (3,32,32)
     net = keynet.cifar10.AllConvNet()    
@@ -426,63 +428,30 @@ def test_sparse_matrix():
     W_torch_sparse = keynet.torch.scipy_coo_to_torch_sparse(scipy.sparse.coo_matrix(W_numpy))    
     W_scipy = scipy.sparse.coo_matrix(W_numpy)
     
-    A = keynet.sparse.SparseMatrix(W_numpy, backend='scipy')
+    A = keynet.sparse.SparseMatrixScipy(W_numpy)
     assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
-    assert np.allclose(A.dot(x_torch), y, atol=1E-5)    
-    A = keynet.sparse.SparseMatrix(W_torch, backend='scipy')
-    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
-    assert np.allclose(A.dot(x_torch), y, atol=1E-5)        
-    A = keynet.sparse.SparseMatrix(W_torch_sparse, backend='scipy')
-    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
-    assert np.allclose(A.dot(x_torch), y, atol=1E-5)        
-    A = keynet.sparse.SparseMatrix(W_scipy, backend='scipy')
-    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
-    assert np.allclose(A.dot(x_torch), y, atol=1E-5)        
+    assert np.allclose(A.torchdot(x_torch).numpy(), y, atol=1E-5)
 
-    A = keynet.sparse.SparseMatrix(W_numpy, backend='torch')
+    A = keynet.sparse.SparseMatrixScipy(W_scipy)
+    A = A.from_scipy_sparse(W_scipy)
     assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
-    assert np.allclose(A.dot(x_torch), y, atol=1E-5)        
-    A = keynet.sparse.SparseMatrix(W_torch, backend='torch')
-    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
-    assert np.allclose(A.dot(x_torch), y, atol=1E-5)        
-    A = keynet.sparse.SparseMatrix(W_torch_sparse, backend='torch')
-    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
-    assert np.allclose(A.dot(x_torch), y, atol=1E-5)        
-    A = keynet.sparse.SparseMatrix(W_scipy, backend='torch')
-    assert np.allclose(A.dot(x_numpy), y, atol=1E-5) 
-    assert np.allclose(A.dot(x_torch), y, atol=1E-5)       
-
-    A = keynet.sparse.SparseMatrix(W_scipy, backend='torch.sparse')
-    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
-    assert np.allclose(A.dot(x_torch), y, atol=1E-5)    
-    A = keynet.sparse.SparseMatrix(W_numpy, backend='torch.sparse')
-    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
-    assert np.allclose(A.dot(x_torch), y, atol=1E-5)        
-    A = keynet.sparse.SparseMatrix(W_torch_sparse, backend='torch.sparse')
-    assert np.allclose(A.dot(x_numpy), y, atol=1E-5)
-    assert np.allclose(A.dot(x_torch), y, atol=1E-5)        
-    print('[test_sparse_matrix]: SparseMatrix PASSED')
-
-    W_tiled = keynet.sparse.SparseTiledMatrix(blocktoeplitz=W_numpy, shape=(3,3), backend='scipy')
-    assert np.allclose(W_tiled.dot(x_numpy), y, atol=1E-5)
-    assert np.allclose(W_tiled.dot(x_torch), y, atol=1E-5)        
-    W_tiled = keynet.sparse.SparseTiledMatrix(blocktoeplitz=W_numpy, shape=(3,3), backend='torch.sparse')    
-    assert np.allclose(W_tiled.dot(x_numpy), y, atol=1E-5)
-    assert np.allclose(W_tiled.dot(x_torch), y, atol=1E-5)        
-
-    W_tiled = keynet.sparse.SparseTiledMatrix(blocktoeplitz=W_numpy, shape=(4,5), backend='scipy')
-    assert W_tiled.dot(np.random.rand(5,1)).shape == (4,1)
-    print('[test_sparse_matrix]: SparseTiledMatrix PASSED')
+    assert np.allclose(A.torchdot(x_torch).numpy(), y, atol=1E-5)
     
+    A = keynet.sparse.SparseMatrixTorch(W_torch)
+    assert np.allclose(A.dot(x_torch).numpy(), y, atol=1E-5)
+    assert np.allclose(A.torchdot(x_torch).numpy(), y, atol=1E-5)
+
+    print('[test_sparse_matrix]: PASSED')
+
     
 if __name__ == '__main__':
     #test_torch_homogenize()
     #test_sparse_toeplitz_conv2d()
     #test_sparse_toeplitz_avgpool2d()
-    #test_sparse_tiled_matrix()    
     #test_keynet_mnist()
     #test_keynet_cifar10()
     #test_semantic_security()
     #test_blockview()
     test_keynet_constructor()
     #test_sparse_matrix()
+    #test_sparse_tiled_matrix()        

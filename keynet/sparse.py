@@ -178,222 +178,192 @@ def sparse_generalized_permutation_block_matrix_with_inverse(n, m, dtype=np.floa
     return(A.astype(dtype), Ainv.astype(dtype))
 
 
-
 class SparseMatrix(object):
-    def __init__(self, A):
-        self._matrix = A
-        assert len(A.shape) == 2, "SparseMatrix must be 2D"
+    def __init__(self):
+        self._matrix = None
         self.ndim = 2
-        self.shape = A.shape
-
+        self.shape = (0,0)  
+        self.dtype = None
+        
     def __repr__(self):
-        return str('<keynet.SparseMatrix: H=%d, W=%d, backend=%s>' % (self.shape[0], self.shape[1], self.backend()))
+        return str('<keynet.SparseMatrix: H=%d, W=%d, backend=%s>' % (self.shape[0], self.shape[1], str(type(self._matrix))))
 
     def __getitem__(self, k):
-        if self.is_numpy_dense() or self.is_scipy_sparse() or self.is_torch():
-            if not (isinstance(k, slice) or isinstance(k, tuple)):
-                k = slice(k,k+1)  # force result to be 2D
-            return SparseMatrix(self._matrix.__getitem__(k))  # no copy
-        else:
-            raise
+        if not (isinstance(k, slice) or isinstance(k, tuple)):
+            k = slice(k,k+1)  # force result to be 2D
+        return SparseMatrix(self._matrix.__getitem__(k))  # no copy
 
-    def backend(self):
-        return str(type(self._matrix))
-    
     def __add__(self, other):
         assert isinstance(other, SparseMatrix), "Invalid input"
-        assert other.backend() == self.backend(), "Backend mismatch"
-        assert self.shape == other.shape
+        assert self.shape == other.shape, "Invalid shape"
         self._matrix += other._matrix
         return self
         
-    def is_torch_sparse(self, x=None):
-        return isinstance(x, torch.sparse.FloatTensor) if x is not None else isinstance(self._matrix, torch.sparse.FloatTensor)
+    def is_torch_sparse(self, x):
+        return isinstance(x, torch.sparse.FloatTensor)
 
-    def is_torch_dense(self, x=None):
-        return isinstance(x, torch.FloatTensor) if x is not None else isinstance(self._matrix, torch.FloatTensor)
+    def is_torch_dense(self, x):
+        return isinstance(x, torch.FloatTensor)
 
-    def is_scipy_sparse(self, x=None):
-        return scipy.sparse.issparse(x) if x is not None else scipy.sparse.issparse(self._matrix)	
+    def is_scipy_sparse(self, x):
+        return scipy.sparse.issparse(x)
 
-    def is_torch(self, x=None):
+    def is_torch(self, x):
         return self.is_torch_sparse(x) or self.is_torch_dense(x)
     
-    def is_cupy_sparse(self, x=None):
-        return False
+    def is_numpy_dense(self, x):
+        return isinstance(x, np.ndarray)
 
-    def is_numpy_dense(self, x=None):
-        return isinstance(x, np.ndarray) if x is not None else isinstance(self._matrix, np.ndarray)
-
-    def is_tiled_sparse(self, x=None):
-        return isinstance(x, SparseTiledMatrix) if x is not None else isinstance(self._matrix, SparseTiledMatrix)
-
-    def is_keynet_sparse(self, x=None):
-        return isinstance(x, SparseMatrix) if x is not None else isinstance(self._matrix, SparseMatrix)
-
-    def _backend_like(self, x):
-        if self.is_torch_dense(x):
-            return 'torch'
-        elif self.is_numpy_dense(x):
-            return 'numpy'
-        elif self.is_scipy_sparse(x):
-            return 'scipy'
-        elif self.is_torch_sparse(x):
-            return 'torch.sparse'
-        else:
-            raise ValueError('Unknown backend for type "%s"' % str(type(x)))
-
-    def _convert_matrix(self, to):
-        self._matrix = self._convert_tensor(self._matrix, to)
-        return self
-        
-    def _convert_tensor(self, x, to):
-        if self.is_torch_dense(to) or to is 'torch':
-            if self.is_numpy_dense(x):
-                return torch.as_tensor(x)
-            elif self.is_scipy_sparse(x):
-                return torch.as_tensor(x.todense())
-            elif self.is_torch_dense(x):
-                return x
-        elif self.is_numpy_dense(to) or to is 'numpy':
-            if self.is_torch_dense(x):
-                return x.detach().numpy()
-            elif self.is_torch_sparse(x):
-                return x.to_dense().detach().numpy()
-            elif self.is_numpy_dense(x):
-                return x
-        elif self.is_scipy_sparse(to) or to is 'scipy':
-            if self.is_torch_dense(x):
-                return scipy.sparse.coo_matrix(x.detach().numpy(), dtype=np.float32)
-            elif self.is_torch_sparse(x):
-                # return torch_sparse_to_scipy_coo(x) 
-                return scipy.sparse.coo_matrix(x.to_dense().detach().numpy(), dtype=np.float32)
-            elif self.is_scipy_sparse(x):
-                return x
-        elif self.is_torch_sparse(to) or to is 'torch.sparse':
-            if self.is_scipy_sparse(x):
-                return scipy_coo_to_torch_sparse(x)
-            elif self.is_torch_sparse(x):
-                return x.to_dense()  # right multiply requires dense
-        elif self.is_cupy_sparse(to) or to is 'cupy':
-            if self.is_torch_dense(x):
-                try_import(package='cupy', pipname='cupy, cupyx')
-                return from_dlpack(self._matrix.dot(cupy.fromDlpack(to_dlpack(x_affine.t()))).toDlpack()).t()
-        raise ValueError('Invalid backend "%s" for tensor format "%s"' % (self.backend(), str(type(x))))
-        
-
-    def matmul(self, x):
-        if self.is_keynet_sparse(x):
-            assert self.shape[1] == x.shape[0], "dimension mismatch"
-            #assert self.backend() == x.backend(), "backend mismatch"
-            return SparseMatrix(self.matmul(x._matrix))  # SparseMatrix() input returns SparseMatrix()
-        elif self.is_tiled_sparse():
-            if self.is_scipy_sparse(x):
-                xh = SparseTiledMatrix(coo_matrix=x, tilesize=self._matrix.tilesize(), backend=self._matrix.backend())  # expensive
-                return self._matrix.matmul(xh)
-            elif self.is_torch_dense(x):
-                xh = self._convert_tensor(x, to='scipy')
-                xh = SparseTiledMatrix(coo_matrix=xh, tilesize=self._matrix.tilesize(), backend=self._matrix.backend())  # expensive
-                return self._matrix.matmul(xh)                
-            elif self.is_tiled_sparse(x):
-                return self._matrix.matmul(x)
-            else:
-                raise ValueError('Invalid input - must be SparseTiledMatrix()')
-        elif self.is_torch_dense():
-            xh = self._convert_tensor(x, to='torch')
-            return torch.matmul(xh)
-        elif self.is_numpy_dense():
-            xh = self._convert_tensor(x, to='numpy')
-            return np.dot(self._matrix, xh)
-        elif self.is_scipy_sparse():
-            xh = self._convert_tensor(x, to='scipy')
-            return self._matrix.dot(xh)  # FIXME
-        else:
-            print(str(type(x)))
-            raise ValueError('Invalid backend "%s" and matrix format "%s"' % (self.backend(), str(type(self._matrix))))                        
-    
-    def dot(self, x):
-        if self.is_torch_sparse():
-            xh = self._convert_tensor(x, to='torch')  
-            y = torch.sparse.mm(self._matrix, xh) 
-        elif self.is_scipy_sparse():
-            xh = self._convert_tensor(x, to='numpy') 
-            y = self._matrix.dot(xh)
-        elif self.is_torch_dense():
-            xh = self._convert_tensor(x, to='torch')              
-            y = torch.matmul(self._matrix, xh)
-        elif self.is_cupy_sparse():
-            xh = self._convert_tensor(x, to='cupy')              
-            y = from_dlpack(self._matrix.dot(xh))
-        elif self.is_tiled_sparse():
-            xh = self._convert_tensor(x, to='numpy')
-            y = self._matrix.dot(xh)
-        else:
-            raise ValueError('Invalid backend "%s"' % self.backend())
-        return self._convert_tensor(y, to=x)  # output same type as input
-    
-    def transpose(self):
-        if self.is_torch() or self.is_cupy_sparse():
-            self._matrix = self._matrix.t()
-            self.shape = self._matrix.shape
-        elif self.is_numpy_dense() or self.is_tiled_sparse() or self.is_scipy_sparse():
-            self._matrix = self._matrix.transpose()
-            self.shape = self._matrix.shape
-        else:
-            raise ValueError('Invalid matrix for transpose')            
-        return self
-
-    def nnz(self):
-        if self.is_scipy_sparse():
-            return self._matrix.nnz
-        elif self.is_tiled_sparse():
-            return self._matrix.nnz()
-        elif self.is_torch() or self.is_numpy_dense():
-            return self._matrix.size
-        elif self.is_torch_sparse():
-            return self._matrix._nnz()
-        else:
-            raise ValueError('Invalid matrix for nnz')            
-        
-    def numpy(self):
-        if self.is_torch():
-            return np.array(self._matrix.detach().numpy())
-        elif self.is_scipy_sparse():
-            return np.array(self._matrix.todense())
-        elif self.is_numpy_dense():
-            return self._matrix
-        else:
-            raise ValueError('invalid matrix for numpy conversion')
-
-    def torch(self):
-        if self.is_numpy_dense():
-            return torch.as_tensor(self._matrix).type(torch.FloatTensor)
-        elif self.is_torch():
-            return self._matrix
-        else:
-            raise ValueError('invalid matrix for torch conversion')            
+    def is_sparse(self, x):
+        return isinstance(x, SparseMatrix)
 
     def clone(self):
         return copy.deepcopy(self)
+
+    # Must be overloaded
+    def matmul(self, A):
+        raise  
+    def torchdot(self, x):
+        raise  
+    def from_torch_dense(self, A):
+        raise
+    def from_scipy_sparse(self, A):
+        raise
+    def nnz(self):
+        raise
+    def transpose(self):
+        raise
+    def tocoo(self):
+        raise
+
+    
+class SparseMatrixScipy(SparseMatrix):
+    def __init__(self, A):
+        assert self.is_scipy_sparse(A) or self.is_numpy_dense(A), "Invalid input - %s" % (str(type(A)))
         
-class SparseTiledMatrix(object):
-    def __init__(self, tilesize=None, coo_matrix=None, blocktoeplitz=None, shape=None, backend='scipy'):
-        self._backend = backend        
-        if coo_matrix is not None:
-            self.from_coomatrix(coo_matrix, tilesize)
-        elif blocktoeplitz is not None:
-            self.from_blocktoeplitz(shape, blocktoeplitz)
-        elif shape is not None and tilesize is not None:
-            self.shape = shape
-            self._tilesize = tilesize
+        super(SparseMatrixScipy, self).__init__()
+        self.shape = A.shape  # shape=(H,W)
+        self._matrix = A.tocsr() if self.is_scipy_sparse(A) else A
+        self.dtype = A.dtype
+        self.ndim = 2
+        
+    def from_torch_dense(self, A):
+        assert self.is_torch_dense(A)                
+        return SparseMatrixScipy(A.detach().numpy())
+
+    def from_scipy_sparse(self, A):
+        assert self.is_scipy_sparse(A)        
+        return SparseMatrixScipy(A)
+    
+    def matmul(self, A):
+        assert isinstance(A, SparseMatrixScipy)
+        self._matrix = scipy.sparse.csr_matrix.dot(self._matrix, A._matrix)
+        self.shape = self._matrix.shape
+        return self
+
+    def dot(self, x_numpy):
+        assert self.is_numpy_dense(x_numpy)
+        return scipy.sparse.csr_matrix.dot(self._matrix, np.matrix(x_numpy))
+        
+    def torchdot(self, x_torch):
+        assert self.is_torch_dense(x_torch)
+        return torch.as_tensor(scipy.sparse.csr_matrix.dot(self._matrix, np.matrix(x_torch.detach().numpy())))
+
+    def nnz(self):
+        return self._matrix.nnz
+
+    def transpose(self):
+        self._matrix = self._matrix.transpose()
+        self.shape = self._matrix.shape
+        return self
+
+    def tocoo(self):
+        return self._matrix.tocoo()
+    
+    
+class SparseMatrixTorch(SparseMatrix):
+    def __init__(self, A):
+        assert self.is_torch_sparse(A) or self.is_torch_dense(A), "Invalid input"
+        
+        super(SparseMatrixTorch, self).__init__()
+        self.shape = A.shape
+        self._matrix = A
+        self.dtype = A.type
+        self.ndim = 2
+        
+    def from_torch_dense(self, A):
+        assert self.is_torch_dense(x)
+        return SparseMatrixTorch(x)
+
+    def from_scipy_sparse(self, A):
+        assert self.is_scipy_sparse(A)
+        return SparseMatrixTorch(scipy_coo_to_torch_sparse(A))
+
+    def matmul(self, A):
+        assert isinstance(A, SparseMatrixTorch)        
+        self._matrix = torch.matmul(self._matrix, A._matrix)
+        self.shape = self._matrix.shape        
+        return self
+
+    def dot(self, x):
+        return self.torchdot(x)
+    
+    def torchdot(self, x):
+        assert self.is_torch_dense(x)
+        return torch.matmul(self._matrix, x)
+
+    def nnz(self):
+        return self._matrix._nnz() if self.is_torch_sparse(self._matrix) else self._matrix.size
+
+    def transpose(self):
+        self._matrix = self._matrix.t()
+        self.shape = self._matrix.shape
+        return self
+
+    def tocoo(self):
+        return torch_sparse_to_scipy_coo(self._matrix)
+
+    
+class SparseTiledMatrix(SparseMatrix):
+    def __init__(self, tilesize=None, coo_matrix=None, blocktoeplitz=None, shape=None):
+        self.dtype = None
+        self.shape = None
+        self.ndim = None
+        self._tilesize = None        
+        self._d_blockhash_to_tile = {}
+        self._blocklist = []
+        
+        if coo_matrix is not None and tilesize is not None:
+            self._from_coomatrix(coo_matrix, tilesize)
+        elif blocktoeplitz is not None and shape is not None:
+            self._from_blocktoeplitz(shape, blocktoeplitz)
         else:
             raise ValueError('Must provide a constructor')
 
-    def backend(self, backend=None):
-        self._backend = backend
-        
-        
-    def from_coomatrix(self, T, tilesize, verbose=False):
+    def __repr__(self):
+        return str('<keynet.SparseTiledMatrix: H=%d, W=%d, tilesize=%d, tiles=%d>' % (*self.shape, self.tilesize(), len(self.tiles())))
+
+    def tilesize(self):
+        return self._tilesize
+
+    def tiles(self):
+        return list(self._d_blockhash_to_tile.values())
+    
+    def _block(self, B):
+        return SparseMatrixScipy(B)
+    
+    def is_tiled_sparse(self, x):
+        return isinstance(x, SparseTiledMatrix)
+
+    def from_torch_dense(self, A):
+        assert self.is_torch_dense(A)
+        return SparseTiledMatrix(coo_matrix=scipy.sparse.coo_matrix(A.detach().numpy()), tilesize=self.tilesize())
+
+    def from_scipy_sparse(self, A):
+        assert self.is_scipy_sparse(A)
+        return SparseTiledMatrix(coo_matrix=A.tocoo(), tilesize=self.tilesize())
+    
+    def _from_coomatrix(self, T, tilesize, verbose=False):
         """Given a sparse matrix T, split into non-overlapping nxn blocks or 'tiles' of size self._tilesize x self.Blocksize, and return an indexed representation for unique submatrices which provides memory efficient matrix vector multiplication when T is self-similar
         
         Representation
@@ -401,14 +371,16 @@ class SparseTiledMatrix(object):
             M = {k:np.array(), ...} a submatrix dictionary, such that the submatrix for block (i,j)=(B[u][0], B[u][1]) is M[B[u][2]]
         
         """
+        assert self.is_scipy_sparse(T), "COO sparse matrix must be scipy.sparse.coo_matrix()"
+        
         self._tilesize = tilesize
         self.dtype = T.dtype
         self.shape = (T.shape[0], T.shape[1])
         self.ndim = 2
+
+        T = T.tocoo()        
         n = tilesize
-        (H,W) = self.shape
-        
-        T = T.tocoo()
+        (H,W) = self.shape        
         ijv = [(i,j,v, (i//n,j//n)) for (i,j,v) in zip(T.row, T.col, T.data)]  # preallocate
         ijv.sort(key=lambda x: x[3])  # in-place sort for groupby, sort only indexes
         d_blockidx_to_rows_cols_vals = {k:(tuple(zip(*tuple(v)))[0:3]) for (k,v) in groupby(ijv, key=lambda x: x[3])}
@@ -426,67 +398,55 @@ class SparseTiledMatrix(object):
                         (blockrows, blockcols, vals) = zip(*[(ii,jj,vv) for (ii,jj,vv) in zip(blockrows, blockcols, vals) if ii < trimshape[0] and jj < trimshape[1]])
                     if len(blockrows) > 0:
                         k = hash(tuple(list(trimshape) + sorted([tuple(r) for r in np.vstack( (W*np.array(blockrows)+np.array(blockcols), np.array(vals)) ).tolist()], key=lambda x: x[0])))
+                        # k = np.random.randint(100000000)  # TESTING
                         if k not in M:
-                            M[k] = SparseMatrix(scipy.sparse.coo_matrix( (vals, (blockrows, blockcols)), shape=trimshape, dtype=np.float32))._convert_matrix(self._backend) 
+                            M[k] = self._block(scipy.sparse.coo_matrix( (vals, (blockrows, blockcols)), shape=trimshape, dtype=np.float32))
                         B.append( (bi, bj, k) )
-        self._B = B
-        self._M = M
+        self._blocklist = B
+        self._d_blockhash_to_tile = M
         return self
 
-    def from_blocktoeplitz(self, shape, B):
+    def _from_blocktoeplitz(self, shape, B):
         """A block Toeplitz matrix has blocks repeated down the main diagonal"""
         assert B.shape[0] == B.shape[1] and B.ndim == 2, "Invalid block, must be square"
+        
         self._tilesize = B.shape[0]
         self.shape = shape
-        n = self._tilesize
-        self._B = [(i//n, i//n, 0) for i in range(0, min(self.shape), n)]
-        self._M = {0: SparseMatrix(scipy.sparse.coo_matrix(B, dtype=np.float32))._convert_matrix(self._backend)}
-
-        if min(self.shape) % n != 0:
-            (H,W) = shape            
-            (i,j,k) = self._B[-1]
-            self._B[-1] = (i,j,1)
-            S = scipy.sparse.coo_matrix(np.eye(n)[0:H-i*n, 0:W-i*n]).astype(np.float32)
-            self._M[1] = SparseMatrix(S)._convert_matrix(self._backend)          
         self.dtype = B.dtype
         self.ndim = 2
+
+        (H,W) = shape                    
+        n = self._tilesize
+        self._blocklist = [(i//n, i//n, 0) for i in range(0, min(self.shape), n)]
+        self._d_blockhash_to_tile = {0: self._block(scipy.sparse.coo_matrix(B, dtype=np.float32))}
+        
+        if min(shape) % n != 0:
+            (i,j,k) = self._blocklist[-1]
+            self._blocklist[-1] = (i,j,1)
+            self._d_blockhash_to_tile[1] = self._block(scipy.sparse.coo_matrix(np.eye(n)[0:H-i*n, 0:W-i*n]).astype(np.float32))
         return self    
-                            
-    def __repr__(self):
-        return str('<keynet.SparseTiledMatrix: H=%d, W=%d, tilesize=%d, tiles=%d, backend=%s>' % (*self.shape, self.tilesize(), len(self.tiles()), self._backend))
-                   
-    def tilesize(self):
-        return self._tilesize
 
-    def tiles(self):
-        return list(self._M.values())
-    
     def dot(self, x):
+        assert self.is_numpy_dense(x)
+        return self.torchdot(torch.as_tensor(x)).numpy()
+    
+    def torchdot(self, x):
         """Input is (C*H*W+1)xN tensor, compute right matrix multiplication T*x, return (-1)xN"""
-        if isinstance(x, SparseTiledMatrix):
-            return self.matmul(x)
-
+                
         n = self._tilesize
         (H,W) = self.shape
 
-        y = torch.zeros((H, x.shape[1])).type(torch.FloatTensor)  # device?
-        
-        for (i,j,k) in self._B:
+        y = torch.zeros((H, x.shape[1])).type(torch.FloatTensor)  # device?        
+        for (i,j,k) in self._blocklist:
             if k is not None:
                 (H_clip, W_clip) = (min(H, i*n+n), min(W, j*n+n))
-                y[i*n:H_clip, :] += self._M[k].dot(x[j*n:W_clip, :])
+                y[i*n:H_clip, :] += self._d_blockhash_to_tile[k].torchdot(x[j*n:W_clip, :])
         return y
                 
-    def transpose(self):
-        self._B = [(j,i,k) for (i,j,k) in self._B]
-        self._M = {k:v.transpose() for (k,v) in self._M.items()}
-        self.shape = (self.shape[1], self.shape[0])
-        return self
-
     def matmul(self, other):
         """For two Tiled() object T1, T2, compute T1.dot(T2) and save in T1"""
         assert isinstance(other, SparseTiledMatrix)
-        assert other._tilesize == self._tilesize
+        assert other._tilesize == self._tilesize, "Non-conformal tilesize"
         assert other.shape[0] == self.shape[1], "Non-conformal shape"
         
         n = self.tilesize()
@@ -496,11 +456,11 @@ class SparseTiledMatrix(object):
         M_accum = {}
         M_hash = {}
         d_product = {}        
-        for (i, jj, v) in self._B:
-            for (ii, j, vo) in other._B:
+        for (i, jj, v) in self._blocklist:
+            for (ii, j, vo) in other._blocklist:
                 if jj == ii and v is not None and vo is not None:
                     if (v,vo) not in d_product:
-                        d_product[(v,vo)] = self._M[v].matmul(other._M[vo])   # cache
+                        d_product[(v,vo)] = self._d_blockhash_to_tile[v].clone().matmul(other._d_blockhash_to_tile[vo])   # cache
                     if (i,j) not in M_accum:
                         M_accum[(i,j)] = d_product[(v,vo)]
                         M_hash[(i,j)] = [(v,vo)]
@@ -515,23 +475,34 @@ class SparseTiledMatrix(object):
                 M[k] = m
             B.append( (i,j,k) )                        
         
-        self._B = B
-        self._M = M
+        self._blocklist = B
+        self._d_blockhash_to_tile = M
         self.shape = (self.shape[0], other.shape[1])
+        return self
+
+    def transpose(self):
+        self._blocklist = [(j,i,k) for (i,j,k) in self._blocklist]
+        self._d_blockhash_to_tile = {k:v.transpose() for (k,v) in self._d_blockhash_to_tile.items()}
+        self.shape = (self.shape[1], self.shape[0])
         return self
     
     def tocoo(self):
-        """Convert to COOrdinate sparse matrix, this is an expensive operation that should be used for small matrices only and for testing purposes"""
+        """Convert to Scipy COOrdinate sparse matrix, this is an expensive operation that should be used for small matrices only and for testing purposes"""
         ((H,W), n) = (self.shape, self._tilesize)
-        d = {(i*n, j*n):scipy.sparse.coo_matrix(self._M[k].numpy()) for (i,j,k) in self._B}
+        d = {(i*n, j*n):self._d_blockhash_to_tile[k].tocoo() for (i,j,k) in self._blocklist}
         B = [ [d[(i,j)] if (i,j) in d else None for j in range(0,W,n)] for i in range(0,H,n)]            
         return scipy.sparse.bmat([ [d[(i,j)] if (i,j) in d else None for j in range(0,W,n)] for i in range(0,H,n)], format='coo')
 
-    def clone(self):
-        return copy.deepcopy(self)
-
     def nnz(self):
-        return sum([scipy.sparse.coo_matrix(m.numpy()).nnz for m in self._M.values()])
+        return sum([m.nnz() for m in self._d_blockhash_to_tile.values()])
+
+
+class SparseTiledMatrixTorch(SparseTiledMatrix):
+    def __init__(self, tilesize=None, coo_matrix=None, blocktoeplitz=None, shape=None):
+        super(SparseTiledMatrixTorch, self).__init__(tilesize, coo_matrix, blocktoeplitz, shape)
+
+    def _block(self, B):
+        return SparseMatrixTorch(scipy_coo_to_torch_sparse(B))
 
     
 def sparse_identity_tiled_matrix_with_inverse(N, tilesize):
