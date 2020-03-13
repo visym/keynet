@@ -367,7 +367,7 @@ class SparseTiledMatrix(SparseMatrix):
                 y[i*n:H_clip, :] += self._d_blockhash_to_tile[k].torchdot(x[j*n:W_clip, :])
         return y
                 
-    def matmul(self, other):
+    def matmul(self, other, verbose=False):
         """For two Tiled() object T1, T2, compute T1.dot(T2) and save in T1"""
         assert isinstance(other, SparseTiledMatrix)
         assert other._tilesize == self._tilesize, "Non-conformal tilesize"
@@ -381,6 +381,8 @@ class SparseTiledMatrix(SparseMatrix):
         M_hash = {}
         d_product = {}        
         for (i, jj, v) in self._blocklist:
+            if verbose:
+                print('[keynet.SparseTiledMatrix][%d/%d]: Product...' % (i,jj))
             for (ii, j, vo) in other._blocklist:
                 if jj == ii and v is not None and vo is not None:
                     if (v,vo) not in d_product:
