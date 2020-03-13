@@ -13,7 +13,6 @@ from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_permuta
 from keynet.sparse import sparse_stochastic_matrix_with_inverse, sparse_generalized_stochastic_matrix_with_inverse, sparse_generalized_permutation_matrix_with_inverse, sparse_identity_matrix_like
 from keynet.sparse import sparse_permutation_tiled_matrix_with_inverse, SparseTiledMatrix, sparse_identity_tiled_matrix_with_inverse, sparse_generalized_permutation_tiled_matrix_with_inverse
 from keynet.sparse import sparse_generalized_stochastic_tiled_matrix_with_inverse
-from keynet.sparse import SparseTiledMatrix, SparseMatrix, SparseMatrixScipy, SparseMatrixTorch
 import keynet.torch
 import keynet.layer
 
@@ -196,54 +195,53 @@ def keygen(format, backend, alpha=None, beta=0, tilesize=None):
     assert backend in backends, "Invalid backend '%s' - must be in '%s'" % (backend, str(backends))
     
     if format == 'identity' and backend == 'scipy':
-        f_keypair = lambda layername, outshape: (SparseMatrixScipy(sparse_identity_matrix(np.prod(outshape)+1)),
-                                                 SparseMatrixScipy(sparse_identity_matrix(np.prod(outshape)+1)))
+        f_keypair = lambda layername, outshape: (keynet.sparse.SparseMatrix(sparse_identity_matrix(np.prod(outshape)+1)),
+                                                 keynet.sparse.SparseMatrix(sparse_identity_matrix(np.prod(outshape)+1)))
     elif format == 'identity' and backend == 'torch':
-        f_keypair = lambda layername, outshape: (SparseMatrixTorch(scipy_coo_to_torch_sparse(sparse_identity_matrix(np.prod(outshape)+1).tocoo())),
-                                                 SparseMatrixTorch(scipy_coo_to_torch_sparse(sparse_identity_matrix(np.prod(outshape)+1).tocoo())))
+        f_keypair = lambda layername, outshape: (keynet.torch.SparseMatrix(sparse_identity_matrix(np.prod(outshape)+1).tocoo()),
+                                                 keynet.torch.SparseMatrix(sparse_identity_matrix(np.prod(outshape)+1).tocoo()))
         
     elif format == 'permutation' and backend == 'scipy':
-        f_keypair = lambda layername, outshape: tuple(SparseMatrixScipy(m) for m in sparse_permutation_matrix_with_inverse(np.prod(outshape)+1))
+        f_keypair = lambda layername, outshape: tuple(keynet.sparse.SparseMatrix(m) for m in sparse_permutation_matrix_with_inverse(np.prod(outshape)+1))
     elif format == 'permutation' and backend == 'torch':
-        f_keypair = lambda layername, outshape: tuple(SparseMatrixTorch(scipy_coo_to_torch_sparse(m)) for m in sparse_permutation_matrix_with_inverse(np.prod(outshape)+1))
+        f_keypair = lambda layername, outshape: tuple(keynet.torch.SparseMatrix(m) for m in sparse_permutation_matrix_with_inverse(np.prod(outshape)+1))
         
     elif format == 'stochastic' and backend == 'scipy':
         assert alpha is not None and beta is not None, "Invalid (alpha, beta)"
-        f_keypair = lambda layername, outshape: tuple(SparseMatrixScipy(m) for m in sparse_generalized_stochastic_matrix_with_inverse(np.prod(outshape)+1, alpha, beta)) if 'relu' not in layername else \
-                                                tuple(SparseMatrixScipy(m) for m in sparse_generalized_permutation_matrix_with_inverse(np.prod(outshape)+1, beta))        
+        f_keypair = lambda layername, outshape: tuple(keynet.sparse.SparseMatrix(m) for m in sparse_generalized_stochastic_matrix_with_inverse(np.prod(outshape)+1, alpha, beta)) if 'relu' not in layername else \
+                                                tuple(keynet.sparse.SparseMatrix(m) for m in sparse_generalized_permutation_matrix_with_inverse(np.prod(outshape)+1, beta))        
     elif format == 'stochastic' and backend == 'torch':
         assert alpha is not None and beta is not None, "Invalid (alpha, beta)"
-        f_keypair = lambda layername, outshape: tuple(SparseMatrixTorch(scipy_coo_to_torch_sparse(m)) for m in sparse_generalized_stochastic_matrix_with_inverse(np.prod(outshape)+1, alpha, beta)) if 'relu' not in layername else \
-                                                tuple(SparseMatrixTorch(scipy_coo_to_torch_sparse(m)) for m in sparse_generalized_permutation_matrix_with_inverse(np.prod(outshape)+1, beta))        
+        f_keypair = lambda layername, outshape: tuple(keynet.torch.SparseMatrix(m) for m in sparse_generalized_stochastic_matrix_with_inverse(np.prod(outshape)+1, alpha, beta)) if 'relu' not in layername else \
+                                                tuple(keynet.torch.SparseMatrix(m) for m in sparse_generalized_permutation_matrix_with_inverse(np.prod(outshape)+1, beta))        
         
     elif format == 'tiled-identity' and backend == 'scipy':
         assert tilesize is not None, "invalid tilesize"
         f_keypair = lambda layername, outshape: sparse_identity_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize)
     elif format == 'tiled-identity' and backend == 'torch': 
         assert tilesize is not None, "invalid tilesize"       
-        f_keypair = lambda layername, outshape: sparse_identity_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize)  # FIXME
+        f_keypair = lambda layername, outshape: sparse_identity_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=keynet.torch.SparseTiledMatrix)
 
     elif format == 'tiled-permutation' and backend == 'scipy':
         assert tilesize is not None, "invalid tilesize"
         f_keypair = lambda layername, outshape: sparse_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize)
     elif format == 'tiled-permutation' and backend == 'torch': 
         assert tilesize is not None, "invalid tilesize"       
-        f_keypair = lambda layername, outshape: tuple(SparseMatrixTorch(scipy_coo_to_torch_sparse(m)) for m in sparse_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize))
+        f_keypair = lambda layername, outshape: sparse_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=keynet.torch.SparseTiledMatrix)
 
     elif format == 'tiled-stochastic' and backend == 'scipy':
         assert tilesize is not None, "invalid tilesize"
         assert alpha is not None and beta is not None, "Invalid (alpha, beta)"
         f_keypair = lambda layername, outshape: sparse_generalized_stochastic_tiled_matrix_with_inverse(np.prod(outshape)+1, alpha, beta) if 'relu' not in layername else \
-                                                sparse_generalized_stochastic_tiled_matrix_with_inverse(np.prod(outshape)+1, beta)
+                                                sparse_generalized_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, beta)
     elif format == 'tiled-stochastic' and backend == 'torch':
         assert tilesize is not None, "invalid tilesize"
         assert alpha is not None and beta is not None, "Invalid (alpha, beta)"
-        f_keypair = lambda layername, outshape: tuple(SparseMatrixTorch(scipy_coo_to_torch_sparse(m)) for m in sparse_generalized_stochastic_tiled_matrix_with_inverse(np.prod(outshape)+1, alpha, beta)) if 'relu' not in layername else \
-                                                tuple(SparseMatrixTorch(scipy_coo_to_torch_sparse(m)) for m in sparse_generalized_stochastic_tiled_matrix_with_inverse(np.prod(outshape)+1, beta))        
+        f_keypair = lambda layername, outshape: sparse_generalized_stochastic_tiled_matrix_with_inverse(np.prod(outshape)+1, alpha, beta, tiler=keynet.torch.SparseTiledMatrix) if 'relu' not in layername else \
+                                                sparse_generalized_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, beta, tiler=keynet.torch.SparseTiledMatrix)   
     return f_keypair
         
     
-
 def Keynet(inshape, net, format, backend, do_output_encryption=False, verbose=True, alpha=None, beta=None, tilesize=None):
     f_keypair = keygen(format, backend, alpha, beta, tilesize)
     sensor = KeyedSensor(inshape, f_keypair('input', inshape))

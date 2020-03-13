@@ -10,6 +10,7 @@ import tempfile
 import os
 from torch import nn
 from collections import OrderedDict
+import keynet.sparse
 
 
 def count_parameters(model):
@@ -175,3 +176,56 @@ def fuse_conv2d_and_bn(conv2d_weight, conv2d_bias, bn_running_mean, bn_running_v
     b = (((b - mean)/var_sqrt)*beta) + gamma
     return (w,b)
 
+
+class SparseMatrix(keynet.sparse.SparseMatrix):
+    def __init__(self, A):
+        assert self.is_torch_sparse(A) or self.is_torch_dense(A) or self.is_scipy_sparse(A), "Invalid input"
+        self.shape = A.shape
+        self._matrix = A
+        self.dtype = A.type if self.is_torch(A) else A.dtype
+        self.ndim = 2
+        
+    def from_torch_dense(self, A):
+        assert self.is_torch_dense(A)
+        return SparseMatrix(A)
+
+    def from_scipy_sparse(self, A):
+        assert self.is_scipy_sparse(A)
+        return SparseMatrix(A)  
+
+    def matmul(self, A):
+        assert isinstance(A, SparseMatrix)
+        A_scipy = scipy.sparse.coo_matrix(A._matrix.detach().numpy()) if self.is_torch(A._matrix) else A._matrix
+        M_scipy = scipy.sparse.coo_matrix(self._matrix.detach().numpy()) if self.is_torch(self._matrix) else self._matrix        
+        self._matrix = scipy.sparse.csr_matrix.dot(M_scipy, A_scipy)  # torch does not support sparse*sparse
+        self.shape = self._matrix.shape        
+        return self
+
+    def dot(self, x):
+        return self.torchdot(x)
+    
+    def torchdot(self, x):
+        assert self.is_torch_dense(x)
+        if self.is_scipy_sparse(self._matrix):
+            self._matrix = scipy_coo_to_torch_sparse(self._matrix.tocoo())  # lazy conversion
+        return torch.sparse.mm(self._matrix, x)
+
+    def nnz(self):
+        return self._matrix._nnz() if self.is_torch_sparse(self._matrix) else self._matrix.size
+
+    def transpose(self):
+        self._matrix = self._matrix.t()
+        self.shape = self._matrix.shape
+        return self
+
+    def tocoo(self):
+        return torch_sparse_to_scipy_coo(self._matrix)
+
+    
+class SparseTiledMatrix(keynet.sparse.SparseTiledMatrix):
+    def __init__(self, tilesize=None, coo_matrix=None, blocktoeplitz=None, shape=None):
+        super(SparseTiledMatrix, self).__init__(tilesize, coo_matrix, blocktoeplitz, shape)
+
+    def _block(self, B):
+        return keynet.torch.SparseMatrix(scipy_coo_to_torch_sparse(B))
+    

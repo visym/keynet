@@ -273,8 +273,12 @@ def test_keynet_constructor():
 
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
-    print('[test_keynet_constructor]:  IdentityKeynet PASSED')
+    print('[test_keynet_constructor]:  IdentityKeynet (scipy) PASSED')
 
+    (sensor, knet) = keynet.system.Keynet(inshape, net, 'identity', 'torch')
+    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    print('[test_keynet_constructor]:  IdentityKeynet (torch) PASSED')
+    
     (sensor, knet) = keynet.system.PermutationKeynet(inshape, net, do_output_encryption=False)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet_constructor]:  PermutationKeynet PASSED')    
@@ -304,7 +308,7 @@ def test_keynet_constructor():
     net = keynet.cifar10.AllConvNet()    
     net.load_state_dict(torch.load('./models/cifar10_allconv.pth', map_location=torch.device('cpu')));
     x = torch.randn(1, *inshape)
-    (sensor, knet) = keynet.system.IdentityTiledKeynet(inshape, net, 256, do_output_encryption=False)    
+    (sensor, knet) = keynet.system.IdentityTiledKeynet(inshape, net, 2048)    
     yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
     assert np.allclose(yh, y, atol=1E-5)    

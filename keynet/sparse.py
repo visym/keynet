@@ -14,14 +14,6 @@ import copy
 from itertools import groupby, product
 import tempfile
 from vipy.util import Stopwatch
-from keynet.torch import scipy_coo_to_torch_sparse
-try:
-    import cupyx
-    import cupy
-except:    
-    pass  # Exception on init if cupy backend used
-from torch.utils.dlpack import to_dlpack
-from torch.utils.dlpack import from_dlpack
 import torch.sparse
 import scipy.sparse
 from numpy.linalg import multi_dot 
@@ -179,12 +171,13 @@ def sparse_generalized_permutation_block_matrix_with_inverse(n, m, dtype=np.floa
 
 
 class SparseMatrix(object):
-    def __init__(self):
-        self._matrix = None
+    def __init__(self, A):
+        assert self.is_scipy_sparse(A) or self.is_numpy_dense(A), "Invalid input - %s" % (str(type(A)))
+        self.shape = A.shape  # shape=(H,W)
+        self._matrix = A.tocsr() if self.is_scipy_sparse(A) else A
+        self.dtype = A.dtype
         self.ndim = 2
-        self.shape = (0,0)  
-        self.dtype = None
-        
+    
     def __repr__(self):
         return str('<keynet.SparseMatrix: H=%d, W=%d, backend=%s>' % (self.shape[0], self.shape[1], str(type(self._matrix))))
 
@@ -221,42 +214,16 @@ class SparseMatrix(object):
         return copy.deepcopy(self)
 
     # Must be overloaded
-    def matmul(self, A):
-        raise  
-    def torchdot(self, x):
-        raise  
-    def from_torch_dense(self, A):
-        raise
-    def from_scipy_sparse(self, A):
-        raise
-    def nnz(self):
-        raise
-    def transpose(self):
-        raise
-    def tocoo(self):
-        raise
-
-    
-class SparseMatrixScipy(SparseMatrix):
-    def __init__(self, A):
-        assert self.is_scipy_sparse(A) or self.is_numpy_dense(A), "Invalid input - %s" % (str(type(A)))
-        
-        super(SparseMatrixScipy, self).__init__()
-        self.shape = A.shape  # shape=(H,W)
-        self._matrix = A.tocsr() if self.is_scipy_sparse(A) else A
-        self.dtype = A.dtype
-        self.ndim = 2
-        
     def from_torch_dense(self, A):
         assert self.is_torch_dense(A)                
-        return SparseMatrixScipy(A.detach().numpy())
+        return SparseMatrix(A.detach().numpy())
 
     def from_scipy_sparse(self, A):
         assert self.is_scipy_sparse(A)        
-        return SparseMatrixScipy(A)
+        return SparseMatrix(A)
     
     def matmul(self, A):
-        assert isinstance(A, SparseMatrixScipy)
+        assert isinstance(A, SparseMatrix)
         self._matrix = scipy.sparse.csr_matrix.dot(self._matrix, A._matrix)
         self.shape = self._matrix.shape
         return self
@@ -279,49 +246,6 @@ class SparseMatrixScipy(SparseMatrix):
 
     def tocoo(self):
         return self._matrix.tocoo()
-    
-    
-class SparseMatrixTorch(SparseMatrix):
-    def __init__(self, A):
-        assert self.is_torch_sparse(A) or self.is_torch_dense(A), "Invalid input"
-        
-        super(SparseMatrixTorch, self).__init__()
-        self.shape = A.shape
-        self._matrix = A
-        self.dtype = A.type
-        self.ndim = 2
-        
-    def from_torch_dense(self, A):
-        assert self.is_torch_dense(x)
-        return SparseMatrixTorch(x)
-
-    def from_scipy_sparse(self, A):
-        assert self.is_scipy_sparse(A)
-        return SparseMatrixTorch(scipy_coo_to_torch_sparse(A))
-
-    def matmul(self, A):
-        assert isinstance(A, SparseMatrixTorch)        
-        self._matrix = torch.matmul(self._matrix, A._matrix)
-        self.shape = self._matrix.shape        
-        return self
-
-    def dot(self, x):
-        return self.torchdot(x)
-    
-    def torchdot(self, x):
-        assert self.is_torch_dense(x)
-        return torch.matmul(self._matrix, x)
-
-    def nnz(self):
-        return self._matrix._nnz() if self.is_torch_sparse(self._matrix) else self._matrix.size
-
-    def transpose(self):
-        self._matrix = self._matrix.t()
-        self.shape = self._matrix.shape
-        return self
-
-    def tocoo(self):
-        return torch_sparse_to_scipy_coo(self._matrix)
 
     
 class SparseTiledMatrix(SparseMatrix):
@@ -350,7 +274,7 @@ class SparseTiledMatrix(SparseMatrix):
         return list(self._d_blockhash_to_tile.values())
     
     def _block(self, B):
-        return SparseMatrixScipy(B)
+        return SparseMatrix(B)
     
     def is_tiled_sparse(self, x):
         return isinstance(x, SparseTiledMatrix)
@@ -497,36 +421,30 @@ class SparseTiledMatrix(SparseMatrix):
         return sum([m.nnz() for m in self._d_blockhash_to_tile.values()])
 
 
-class SparseTiledMatrixTorch(SparseTiledMatrix):
-    def __init__(self, tilesize=None, coo_matrix=None, blocktoeplitz=None, shape=None):
-        super(SparseTiledMatrixTorch, self).__init__(tilesize, coo_matrix, blocktoeplitz, shape)
-
-    def _block(self, B):
-        return SparseMatrixTorch(scipy_coo_to_torch_sparse(B))
 
     
-def sparse_identity_tiled_matrix_with_inverse(N, tilesize):
+def sparse_identity_tiled_matrix_with_inverse(N, tilesize, tiler=SparseTiledMatrix):
     (B, Binv) = (sparse_identity_matrix(tilesize), sparse_identity_matrix(tilesize))
-    return (SparseTiledMatrix(shape=(N,N), blocktoeplitz=B.todense(), tilesize=tilesize),
-            SparseTiledMatrix(shape=(N,N), blocktoeplitz=Binv.todense(), tilesize=tilesize))
+    return (tiler(shape=(N,N), blocktoeplitz=B.todense(), tilesize=tilesize),
+            tiler(shape=(N,N), blocktoeplitz=Binv.todense(), tilesize=tilesize))
 
 
-def sparse_permutation_tiled_matrix_with_inverse(N, tilesize):
+def sparse_permutation_tiled_matrix_with_inverse(N, tilesize, tiler=SparseTiledMatrix):
     (B, Binv) = sparse_permutation_matrix_with_inverse(tilesize)
-    return (SparseTiledMatrix(shape=(N,N), blocktoeplitz=B.todense(), tilesize=tilesize),
-            SparseTiledMatrix(shape=(N,N), blocktoeplitz=Binv.todense(), tilesize=tilesize))
+    return (tiler(shape=(N,N), blocktoeplitz=B.todense(), tilesize=tilesize),
+            tiler(shape=(N,N), blocktoeplitz=Binv.todense(), tilesize=tilesize))
 
 
-def sparse_generalized_permutation_tiled_matrix_with_inverse(N, tilesize, beta):
+def sparse_generalized_permutation_tiled_matrix_with_inverse(N, tilesize, beta, tiler=SparseTiledMatrix):
     (B, Binv) = sparse_generalized_permutation_matrix_with_inverse(tilesize, beta)
-    return (SparseTiledMatrix(shape=(N,N), blocktoeplitz=B.todense(), tilesize=tilesize),
-            SparseTiledMatrix(shape=(N,N), blocktoeplitz=Binv.todense(), tilesize=tilesize))
+    return (tiler(shape=(N,N), blocktoeplitz=B.todense(), tilesize=tilesize),
+            tiler(shape=(N,N), blocktoeplitz=Binv.todense(), tilesize=tilesize))
 
 
-def sparse_generalized_stochastic_tiled_matrix_with_inverse(N, tilesize, alpha, beta=0):
+def sparse_generalized_stochastic_tiled_matrix_with_inverse(N, tilesize, alpha, beta=0, tiler=SparseTiledMatrix):
     (B, Binv) = sparse_generalized_stochastic_matrix_with_inverse(tilesize, alpha, beta)
-    return (SparseTiledMatrix(shape=(N,N), blocktoeplitz=B.todense(), tilesize=tilesize),
-            SparseTiledMatrix(shape=(N,N), blocktoeplitz=Binv.todense(), tilesize=tilesize))
+    return (tiler(shape=(N,N), blocktoeplitz=B.todense(), tilesize=tilesize),
+            tiler(shape=(N,N), blocktoeplitz=Binv.todense(), tilesize=tilesize))
 
 
 
