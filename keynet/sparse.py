@@ -224,16 +224,24 @@ class SparseMatrix(object):
     
     def matmul(self, A):
         assert isinstance(A, SparseMatrix)
+        if self.is_scipy_sparse(self._matrix):
+            self._matrix = self._matrix.tocsr()
+        if self.is_scipy_sparse(A._matrix):
+            A._matrix = A._matrix.tocsc()
         self._matrix = scipy.sparse.csr_matrix.dot(self._matrix, A._matrix)
         self.shape = self._matrix.shape
         return self
 
     def dot(self, x_numpy):
         assert self.is_numpy_dense(x_numpy)
+        if self.is_scipy_sparse(self._matrix):
+            self._matrix = self._matrix.tocsr()
         return scipy.sparse.csr_matrix.dot(self._matrix, np.matrix(x_numpy))
         
     def torchdot(self, x_torch):
         assert self.is_torch_dense(x_torch)
+        if self.is_scipy_sparse(self._matrix):
+            self._matrix = self._matrix.tocsr()
         return torch.as_tensor(scipy.sparse.csr_matrix.dot(self._matrix, np.matrix(x_torch.detach().numpy())))
 
     def nnz(self):
