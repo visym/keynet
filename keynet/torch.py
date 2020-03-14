@@ -58,8 +58,8 @@ def netshape(net, inshape):
 def _parallel_sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1, n_processes=1):
     T = Parallel(n_jobs=n_processes)(delayed(sparse_toeplitz_conv2d)(inshape, f, bias, as_correlation, stride, n_processes=1, rowskip=i) for i in range(inshape[1]))
     R = np.sum(T).tocsr().transpose()
-    R[-1] = T[0].tocsr().transpose()[-1]  # bias column
-    return R.transpose().tocsr()
+    R[-1] = T[0].tocsr().transpose()[-1]  # replace bias column
+    return R.transpose().tocoo()
     
                                 
 def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1, rowskip=None, n_processes=1):
