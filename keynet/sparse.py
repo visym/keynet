@@ -17,6 +17,7 @@ from vipy.util import Stopwatch
 import torch.sparse
 import scipy.sparse
 from numpy.linalg import multi_dot 
+from collections import defaultdict
 
 
 def sparse_block_diag(mats, format='coo'):
@@ -255,6 +256,14 @@ class SparseMatrix(object):
     def tocoo(self):
         return self._matrix.tocoo()
 
+    def ascsr(self):
+        self._matrix = self._matrix.tocsr()
+        return self
+
+    def ascsc(self):
+        self._matrix = self._matrix.tocsc()
+        return self
+
     
 class SparseTiledMatrix(SparseMatrix):
     def __init__(self, tilesize=None, coo_matrix=None, blocktoeplitz=None, shape=None):
@@ -296,7 +305,8 @@ class SparseTiledMatrix(SparseMatrix):
         return SparseTiledMatrix(coo_matrix=A.tocoo(), tilesize=self.tilesize())
     
     def _from_coomatrix(self, T, tilesize, verbose=False):
-        """Given a sparse matrix T, split into non-overlapping nxn blocks or 'tiles' of size self._tilesize x self.Blocksize, and return an indexed representation for unique submatrices which provides memory efficient matrix vector multiplication when T is self-similar
+        """Given a sparse matrix T, split into non-overlapping nxn blocks or 'tiles' of size self._tilesize x self.Blocksize, and 
+           return an indexed representation for unique submatrices which provides memory efficient matrix vector multiplication when T is self-similar.
         
         Representation
             B = [(i,j,k),...] for block index (i,j) with submatrix key k
@@ -313,9 +323,16 @@ class SparseTiledMatrix(SparseMatrix):
         T = T.tocoo()        
         n = tilesize
         (H,W) = self.shape        
-        ijv = [(i,j,v, (i//n,j//n)) for (i,j,v) in zip(T.row, T.col, T.data)]  # preallocate
-        ijv.sort(key=lambda x: x[3])  # in-place sort for groupby, sort only indexes
-        d_blockidx_to_rows_cols_vals = {k:(tuple(zip(*tuple(v)))[0:3]) for (k,v) in groupby(ijv, key=lambda x: x[3])}
+
+        # Faster than groupby
+        d_blockidx_to_rows_cols_vals = defaultdict(list)
+        for (i,j,v) in zip(T.row, T.col, T.data):
+            d_blockidx_to_rows_cols_vals[ (i//n, j//n) ].append( (i,j,v) )
+
+        # Slow for large matrices
+        #ijv = [(i,j,v, (i//n,j//n)) for (i,j,v) in zip(T.row, T.col, T.data)]  # preallocate
+        #ijv.sort(key=lambda x: x[3])  # in-place sort for groupby, sort only indexes
+        #d_blockidx_to_rows_cols_vals = {k:(tuple(zip(*tuple(v)))[0:3]) for (k,v) in groupby(ijv, key=lambda x: x[3])}
         
         # Single process hashing and tiling
         d = d_blockidx_to_rows_cols_vals
@@ -323,14 +340,13 @@ class SparseTiledMatrix(SparseMatrix):
         for (bi, i) in enumerate(range(0, T.shape[0], n)):
             for (bj, j) in enumerate(range(0, T.shape[1], n)):
                 if (bi, bj) in d and len(d[bi, bj])>0:
-                    (rows, cols, vals) = d[bi, bj]
+                    (rows, cols, vals) = zip(*d[bi, bj])
                     (blockrows, blockcols) = (np.array(rows)-i, np.array(cols)-j)
                     trimshape = (min(H-i, n), min(W-j, n))
                     if trimshape[0] < n or trimshape[1] < n:
                         (blockrows, blockcols, vals) = zip(*[(ii,jj,vv) for (ii,jj,vv) in zip(blockrows, blockcols, vals) if ii < trimshape[0] and jj < trimshape[1]])
                     if len(blockrows) > 0:
                         k = hash(tuple(list(trimshape) + sorted([tuple(r) for r in np.vstack( (W*np.array(blockrows)+np.array(blockcols), np.array(vals)) ).tolist()], key=lambda x: x[0])))
-                        # k = np.random.randint(100000000)  # TESTING
                         if k not in M:
                             M[k] = self._block(scipy.sparse.coo_matrix( (vals, (blockrows, blockcols)), shape=trimshape, dtype=np.float32))
                         B.append( (bi, bj, k) )
@@ -372,7 +388,7 @@ class SparseTiledMatrix(SparseMatrix):
         for (i,j,k) in self._blocklist:
             if k is not None:
                 (H_clip, W_clip) = (min(H, i*n+n), min(W, j*n+n))
-                y[i*n:H_clip, :] += self._d_blockhash_to_tile[k].torchdot(x[j*n:W_clip, :])
+                y[i*n:H_clip, :] += self._d_blockhash_to_tile[k].ascsr().torchdot(x[j*n:W_clip, :])
         return y
                 
     def matmul(self, other, verbose=False):
@@ -394,7 +410,7 @@ class SparseTiledMatrix(SparseMatrix):
             for (ii, j, vo) in other._blocklist:
                 if jj == ii and v is not None and vo is not None:
                     if (v,vo) not in d_product:
-                        d_product[(v,vo)] = self._d_blockhash_to_tile[v].clone().matmul(other._d_blockhash_to_tile[vo])   # cache
+                        d_product[(v,vo)] = self._d_blockhash_to_tile[v].ascsr().clone().matmul(other._d_blockhash_to_tile[vo].ascsc())   # cache
                     if (i,j) not in M_accum:
                         M_accum[(i,j)] = d_product[(v,vo)]
                         M_hash[(i,j)] = [(v,vo)]

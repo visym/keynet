@@ -307,10 +307,18 @@ def test_keynet_constructor():
     net = keynet.cifar10.AllConvNet()    
     net.load_state_dict(torch.load('./models/cifar10_allconv.pth', map_location=torch.device('cpu')));
     x = torch.randn(1, *inshape)
+    (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)    
+    yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
+    y = net.forward(x).detach().numpy().flatten()
+    assert np.allclose(yh, y, atol=1E-5)    
+    print('[test_keynet_constructor]:  IdentityKeynet (allconvnet) PASSED')
+
     (sensor, knet) = keynet.system.IdentityTiledKeynet(inshape, net, 2048, n_processes=8)    
     yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
     assert np.allclose(yh, y, atol=1E-5)    
+    print('[test_keynet_constructor]:  IdentityTiledKeynet (allconvnet) PASSED')
+
     print('[test_keynet_constructor]:  PASSED')    
     
     
