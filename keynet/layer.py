@@ -46,7 +46,7 @@ class KeyedLayer(nn.Module):
 
     
 class KeyedConv2d(KeyedLayer):
-    def __init__(self, inshape, in_channels, out_channels, kernel_size, stride):
+    def __init__(self, inshape, in_channels, out_channels, kernel_size, stride, n_processes=1):
         super(KeyedConv2d, self).__init__()
 
         assert len(kernel_size)==1 or len(kernel_size)==2 and (kernel_size[0] == kernel_size[1]), "Kernel must be square"
@@ -58,7 +58,8 @@ class KeyedConv2d(KeyedLayer):
         self.out_channels = out_channels
         self.inshape = inshape
         assert len(inshape) == 3, "Inshape must be (C,H,W) for the shape of the tensor at the input to this layer"""
-        
+        self._n_processes = n_processes
+
     def extra_repr(self):
         str_shape = ', backend=%s, shape=%s>' % (str(type(self.W)), str(self.W.shape)) if self.W is not None else '>'
         return str('<KeyedConv2d: in_channels=%d, out_channels=%d, kernel_size=%s, stride=%s%s' (self.in_channels, self.out_channels, str(self.kernel_size), str(self.stride), str_shape))
@@ -81,7 +82,7 @@ class KeyedConv2d(KeyedLayer):
                 w.shape[1] == self.in_channels and
                 w.shape[2] == self.kernel_size and
                 b.shape[0] == self.out_channels), "Invalid input"
-        W = sparse_toeplitz_conv2d(self.inshape, w.detach().numpy(), bias=b.detach().numpy(), stride=self.stride)   # Expensive
+        W = sparse_toeplitz_conv2d(self.inshape, w.detach().numpy(), bias=b.detach().numpy(), stride=self.stride, n_processes=self._n_processes)   # Expensive
         return super(KeyedConv2d, self).key(W, A, Ainv)
 
         

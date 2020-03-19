@@ -20,7 +20,7 @@ from keynet.util import blockview
 
 
 class KeyedModel(object):
-    def __init__(self, net, inshape, inkey, f_layername_to_keypair, do_output_encryption=False, verbose=True):
+    def __init__(self, net, inshape, inkey, f_layername_to_keypair, do_output_encryption=False, verbose=True, n_processes=1):
         # Assign layerkeys using provided lambda function
         net.eval()
         netshape = keynet.torch.netshape(net, inshape)
@@ -54,8 +54,10 @@ class KeyedModel(object):
                                                    in_channels=m.in_channels,
                                                    kernel_size=m.kernel_size,
                                                    stride=m.stride)
+                                                   stride=m.stride,
+                d_name_to_keyedmodule[k] = m_keyed
                 if '%s_bn' % k not in layernames:                
-                    d_name_to_keyedmodule[k] = m_keyed.key(m.weight, m.bias, layerkey[k]['A'], layerkey[k]['Ainv'])
+                    d_name_to_keyedmodule[k] = d_name_to_keyedmodule[k].key(m.weight, m.bias, layerkey[k]['A'], layerkey[k]['Ainv'])
             elif isinstance(m, nn.AvgPool2d):
                 m_keyed = keynet.layer.KeyedAvgpool2d(inshape=netshape[k]['inshape'],
                                                       kernel_size=m.kernel_size,
@@ -109,10 +111,6 @@ class KeyedModel(object):
         """When publicly releasing the keynet, remove keys (if present)"""
         self._imagekey = None
         self._embeddingkey = None        
-
-    def parallel(self, n_processes):
-        self._n_processes = n_processes
-        return self
 
     def num_parameters(self):
         return sum([c.nnz() for (k,c) in self._keynet.named_children() if hasattr(c, 'nnz')])
@@ -257,10 +255,10 @@ def keygen(format, backend, alpha=None, beta=0, tilesize=None):
         raise ValueError("Invalid format '%s' - must be in '%s'" % (format, str(formats)))
 
     
-def Keynet(inshape, net, format, backend, do_output_encryption=False, verbose=True, alpha=None, beta=None, tilesize=None):
+def Keynet(inshape, net, format, backend, do_output_encryption=False, verbose=True, alpha=None, beta=None, tilesize=None, n_processes=1):
     f_keypair = keygen(format, backend, alpha, beta, tilesize)
     sensor = KeyedSensor(inshape, f_keypair('input', inshape))
-    model = KeyedModel(net, inshape, sensor.key(), f_keypair, do_output_encryption=do_output_encryption, verbose=verbose)
+    model = KeyedModel(net, inshape, sensor.key(), f_keypair, do_output_encryption=do_output_encryption, verbose=verbose, n_processes=n_processes)
     return (sensor, model)
 
 
@@ -276,16 +274,16 @@ def StochasticKeynet(inshape, net, alpha, beta=0, do_output_encryption=False):
     return Keynet(inshape, net, 'stochastic', 'scipy', do_output_encryption, alpha=alpha, beta=beta)    
 
 
-def IdentityTiledKeynet(inshape, net, tilesize):
-    return Keynet(inshape, net, 'tiled-identity', 'scipy', do_output_encryption=False, tilesize=tilesize)
+def IdentityTiledKeynet(inshape, net, tilesize, n_processes=1):
+    return Keynet(inshape, net, 'tiled-identity', 'scipy', do_output_encryption=False, tilesize=tilesize, n_processes=n_processes)
 
 
-def PermutationTiledKeynet(inshape, net, tilesize, do_output_encryption=False):
-    return Keynet(inshape, net, 'tiled-permutation', 'scipy', do_output_encryption, tilesize=tilesize)
+def PermutationTiledKeynet(inshape, net, tilesize, do_output_encryption=False, n_processes=1):
+    return Keynet(inshape, net, 'tiled-permutation', 'scipy', do_output_encryption, tilesize=tilesize, n_processes=n_processes)
 
 
-def StochasticTiledKeynet(inshape, net, tilesize, alpha, beta=0, do_output_encryption=False):
-    return Keynet(inshape, net, 'tiled-stochastic', 'scipy', do_output_encryption, tilesize=tilesize, alpha=alpha, beta=beta)
+def StochasticTiledKeynet(inshape, net, tilesize, alpha, beta=0, do_output_encryption=False, n_processes=1):
+    return Keynet(inshape, net, 'tiled-stochastic', 'scipy', do_output_encryption, tilesize=tilesize, alpha=alpha, beta=beta, n_processes=n_processes)
 
 
 def StochasticTiledKeySensor(inshape, tilesize, alpha, beta=0):

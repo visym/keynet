@@ -11,6 +11,7 @@ import os
 from torch import nn
 from collections import OrderedDict
 import keynet.sparse
+from joblib import Parallel, delayed
 
 
 def count_parameters(model):
@@ -54,11 +55,21 @@ def netshape(net, inshape):
     return d_modulename_to_shape
 
 
-def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1):
+def _parallel_sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1, n_processes=1):
+    T = Parallel(n_jobs=n_processes)(delayed(sparse_toeplitz_conv2d)(inshape, f, bias, as_correlation, stride, n_processes=1, rowskip=i) for i in range(inshape[1]))
+    R = np.sum(T).tocsr().transpose()
+    R[-1] = T[0].tocsr().transpose()[-1]  # replace bias column
+    return R.transpose().tocoo()
+    
+                                
+def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1, rowskip=None, n_processes=1):
     """ Returns sparse toeplitz matrix (W) in coo format that is equivalent to per-channel pytorch conv2d (spatial correlation) of filter f with a given image with shape=inshape vectorized
         conv2d(img, f) == np.dot(W, img.flatten()), right multiplied
         Example usage: test_keynet.test_sparse_toeplitz_conv2d()
     """
+
+    if n_processes > 1:
+        return _parallel_sparse_toeplitz_conv2d(inshape, f, bias, as_correlation, stride, n_processes=n_processes)
 
     # Valid shapes
     assert(len(inshape) == 3 and len(f.shape) == 4)  # 3D tensor inshape=(inchannels, height, width), f.shape=(outchannels, kernelheight, kernelwidth, inchannels)
@@ -75,34 +86,40 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1)
     P_range = range(-((P-1)//2), ((P-1)//2) + 1) if P%2==1 else range(-((P-1)//2), ((P-1)//2) + 2)
     Q_range = range(-((Q-1)//2), ((Q-1)//2) + 1) if P%2==1 else range(-((Q-1)//2), ((Q-1)//2) + 2)
     (data, row_ind, col_ind) = ([],[],[])
+    (U_div_stride, V_div_stride) = (U//stride, V//stride)
 
     # For every image_row
     for (ku,u) in enumerate(np.arange(0,U,stride)):
+        if rowskip is not None and u != rowskip:
+            continue
         # For every image_column
         for (kv,v) in enumerate(np.arange(0,V,stride)):
             # For every inchannel (transposed)
             for (k_inchannel, c_inchannel) in enumerate(C_range if as_correlation else reversed(C_range)):
                 # For every kernel_row (transposed)
                 for (i,p) in enumerate(P_range if as_correlation else reversed(P_range)):
+                    if not ((u+p)>=0 and (u+p)<U):
+                        continue  
                     # For every kernel_col (transposed)
                     for (j,q) in enumerate(Q_range if as_correlation else reversed(Q_range)):
                         # For every outchannel
-                        if ((u+p)>=0 and (v+q)>=0 and (u+p)<U and (v+q)<V):
-                            c = np.ravel_multi_index( (c_inchannel, u+p, v+q), (C,U,V) )
+                        if ((v+q)>=0 and (v+q)<V):
+                            #c = np.ravel_multi_index( (c_inchannel, u+p, v+q), (C,U,V) )
+                            c = c_inchannel*U*V + (u+p)*V + (v+q)
                             for (k_outchannel, c_outchannel) in enumerate(M_range if as_correlation else reversed(M_range)):
                                 data.append(f[k_outchannel,k_inchannel,i,j])
-                                row_ind.append( np.ravel_multi_index( (c_outchannel,ku,kv), (M,U//stride,V//stride) ) )
+                                #row_ind.append( np.ravel_multi_index( (c_outchannel,ku,kv), (M,U//stride,V//stride) ) )
+                                row_ind.append( c_outchannel*(U_div_stride)*(V_div_stride) + ku*(V_div_stride) + kv )
                                 col_ind.append( c )
 
     # Sparse matrix with optional bias using affine augmentation 
-    T = coo_matrix((data, (row_ind, col_ind)), shape=(M*(U//stride)*(V//stride), C*U*V))
+    T = scipy.sparse.coo_matrix((data, (row_ind, col_ind)), shape=(M*(U//stride)*(V//stride), C*U*V))
     if bias is not None:
-        lastcol = coo_matrix(np.array([x*np.ones( (U//stride*V//stride), dtype=np.float32) for x in bias]).reshape( (M*(U//stride)*(V//stride),1) ))
+        lastcol = scipy.sparse.coo_matrix(np.array([x*np.ones( (U//stride*V//stride), dtype=np.float32) for x in bias]).reshape( (M*(U//stride)*(V//stride),1) ))
     else:
-        lastcol = coo_matrix(np.zeros( (T.shape[0],1), dtype=np.float32 ))
+        lastcol = scipy.sparse.coo_matrix(np.zeros( (T.shape[0],1), dtype=np.float32 ))
     lastrow = np.zeros(T.shape[1]+1, dtype=np.float32);  lastrow[-1]=np.float32(1.0);  
-    T = coo_matrix(scipy.sparse.vstack( (scipy.sparse.hstack( (T,lastcol)), coo_matrix(lastrow)) ))
-    return T
+    return scipy.sparse.coo_matrix(scipy.sparse.vstack( (scipy.sparse.hstack( (T,lastcol)), scipy.sparse.coo_matrix(lastrow)) ))
 
 
 def sparse_toeplitz_avgpool2d(inshape, filtershape, stride):
@@ -197,7 +214,7 @@ class SparseMatrix(keynet.sparse.SparseMatrix):
         assert isinstance(A, SparseMatrix)
         A_scipy = scipy.sparse.coo_matrix(A._matrix.detach().numpy()) if self.is_torch(A._matrix) else A._matrix
         M_scipy = scipy.sparse.coo_matrix(self._matrix.detach().numpy()) if self.is_torch(self._matrix) else self._matrix        
-        self._matrix = scipy.sparse.csr_matrix.dot(M_scipy, A_scipy)  # torch does not support sparse*sparse
+        self._matrix = scipy.sparse.csr_matrix.dot(M_scipy.tocsr(), A_scipy.tocsc())  # torch does not support sparse*sparse
         self.shape = self._matrix.shape        
         return self
 
