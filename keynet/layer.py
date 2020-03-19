@@ -9,7 +9,7 @@ from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_permuta
 from keynet.sparse import sparse_stochastic_matrix_with_inverse, sparse_generalized_stochastic_matrix_with_inverse, sparse_generalized_permutation_matrix_with_inverse, sparse_identity_matrix_like
 from keynet.sparse import sparse_permutation_tiled_matrix_with_inverse, SparseTiledMatrix, sparse_identity_tiled_matrix_with_inverse, sparse_generalized_permutation_tiled_matrix_with_inverse
 from keynet.sparse import sparse_generalized_stochastic_tiled_matrix_with_inverse
-from keynet.sparse import SparseTiledMatrix, SparseMatrix
+from keynet.sparse import SparseTiledMatrix, SparseMatrix, is_scipy_sparse
 import vipy
 
 
@@ -19,20 +19,20 @@ class KeyedLayer(nn.Module):
         self.W = W if W is not None else None
 
     def forward(self, x_affine):
-        assert self.W is not None, "Layer not keyed"        
+        assert self.W is not None, "Layer not keyed"
         assert isinstance(self.W, SparseMatrix), "Layer not keyed"
         return self.W.torchdot(x_affine.t()).t()
         
     def key(self, W, A, Ainv):
         assert isinstance(A, SparseMatrix) or isinstance(Ainv, SparseMatrix), "Invalid input"
         if W is not None and A is not None and A is not None:
-            Wh = A.from_scipy_sparse(W) if A.is_scipy_sparse(W) else A.from_torch_dense(W)
+            Wh = A.from_scipy_sparse(W) if is_scipy_sparse(W) else A.from_torch_dense(W)            
             self.W = A.matmul(Wh).matmul(Ainv)
         elif W is not None and A is not None:
-            Wh = A.from_scipy_sparse(W) if A.is_scipy_sparse(W) else A.from_torch_dense(W)            
+            Wh = A.from_scipy_sparse(W) if is_scipy_sparse(W) else A.from_torch_dense(W)            
             self.W = A.matmul(Wh)
         elif W is not None and Ainv is not None:
-            Wh = Ainv.from_scipy_sparse(W) if Ainv.is_scipy_sparse(W) else Ainv.from_torch_dense(W)                        
+            Wh = Ainv.from_scipy_sparse(W) if is_scipy_sparse(W) else Ainv.from_torch_dense(W)                        
             self.W = Wh.matmul(Ainv)
         elif W is None and Ainv is not None and A is not None:
             self.W = A.matmul(Ainv)

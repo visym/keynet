@@ -22,7 +22,7 @@ def matrix_blockview(W, inshape, n):
 
 
 def blockview(A, n):
-    """View an np.array A such that block A[0:n, 0:n, :] is continguous, followed by block A[0:n, n:2*n, :], rather than row continuous"""
+    """View an np.array A of size (H,W) as an array of shape (H//n, W//n, n, n), such that entry blockview(A,n)[0,0] == A[0:n,0:n]"""
     shape = (A.shape[0]//n, A.shape[1]//n) + (n,n)
     strides = (n*A.strides[0], n*A.strides[1])+ A.strides
     return as_strided(A, shape=shape, strides=strides)
@@ -61,39 +61,6 @@ def torch_conv2d_in_scipy(x,f,b=None,stride=1):
     return np.reshape(y, (N,M,U//stride,V//stride) )
 
                 
-def random_positive_definite_matrix(n, dtype=np.float32):
-    A = np.random.rand(n,n).astype(dtype)
-    U, s, V = np.linalg.svd(np.dot(A.T, A))
-    X = np.dot(np.dot(U, 1.0 + np.diag(np.random.rand(n).astype(dtype))), V)
-    return X
-
-
-def random_permutation_matrix(n):
-    A = np.eye(n)
-    A = np.random.permutation(A)
-    return A
-
-
-def random_doubly_stochastic_matrix(n,k,n_iter=100):
-    A = np.random.rand()*random_permutation_matrix(n)
-    for k in range(0,k):
-        A = A + np.random.rand()*random_permutation_matrix(n)
-    for k in range(0,n_iter):
-        A = A / np.sum(A,axis=0)
-        A = A / np.sum(A,axis=1)        
-    return A
-
-
-def gaussian_random_diagonal_matrix(n,sigma=1):
-    d = sigma*np.random.randn(n)
-    return (np.diag(d))
-
-
-def uniform_random_diagonal_matrix(n,scale=1,eps=1E-6):
-    d = scale*np.random.rand(n) + eps
-    return (np.diag(d))
-
-
 def checkerboard_256x256():
     """Random uint8 rgb color 8x8 checkerboard at 256x256 resolution"""
     img = np.uint8(255*np.random.rand(8,8,3))
