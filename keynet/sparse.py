@@ -21,10 +21,10 @@ from keynet.dense import random_positive_definite_matrix, random_doubly_stochast
 from keynet.util import blockview
 
 
-def sparse_channelorder_to_blockorder(shape, blocksize, homogenize=False):
+def sparse_channelorder_to_blockorder(shape, blockshape, homogenize=False):
     (C,H,W) = shape
     img_channelorder = np.array(range(0, H*W)).reshape(H,W)
-    img_blockorder = blockview(img_channelorder, blocksize).flatten()
+    img_blockorder = blockview(img_channelorder, blockshape).flatten()
     (rows, cols, vals) = ([], [], [])
     for c in range(0,C):
         rows.extend(np.array(range(0, H*W)) + c*H*W)
@@ -441,10 +441,13 @@ class SparseTiledMatrix(SparseMatrix):
                 
     def matmul(self, other, verbose=False):
         """For two Tiled() object T1, T2, compute T1.dot(T2) and save in T1"""
-        assert isinstance(other, SparseTiledMatrix)
-        assert other._tilesize == self._tilesize, "Non-conformal tilesize"
-        assert other.shape[0] == self.shape[1], "Non-conformal shape"
-        
+        assert isinstance(other, SparseTiledMatrix) or isinstance(other, SparseMatrix), "Invalid input - Must be SparseMatrix()"
+        assert other.shape[0] == self.shape[1], "Non-conformal shape"        
+        if isinstance(other, SparseMatrix) and not isinstance(other, SparseTiledMatrix):
+            # Downgrade to sparse matrix, multiply then upgrade to SparseTiledMatrix (expensive)
+            return self._from_coomatrix(SparseMatrix(self.tocoo()).matmul(other).tocoo(), self.tilesize())
+
+        assert other._tilesize == self._tilesize, "Non-conformal tilesize"    
         n = self.tilesize()
         (H,W) = self.shape
 

@@ -11,12 +11,14 @@ from vipy.util import try_import
 from keynet.torch import homogenize_matrix, sparse_toeplitz_conv2d, sparse_toeplitz_avgpool2d, scipy_coo_to_torch_sparse
 from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse, sparse_identity_matrix
 from keynet.sparse import sparse_stochastic_matrix_with_inverse, sparse_generalized_stochastic_matrix_with_inverse, sparse_generalized_permutation_matrix_with_inverse, sparse_identity_matrix_like
-from keynet.sparse import sparse_permutation_tiled_matrix_with_inverse, SparseTiledMatrix, sparse_identity_tiled_matrix_with_inverse, sparse_generalized_permutation_tiled_matrix_with_inverse
-from keynet.sparse import sparse_generalized_stochastic_tiled_matrix_with_inverse, sparse_block_permutation_tiled_matrix_with_inverse
+from keynet.sparse import sparse_permutation_tiled_matrix_with_inverse, sparse_identity_tiled_matrix_with_inverse, sparse_generalized_permutation_tiled_matrix_with_inverse
+from keynet.sparse import sparse_generalized_stochastic_tiled_matrix_with_inverse, sparse_block_permutation_tiled_matrix_with_inverse, sparse_channelorder_to_blockorder
 import keynet.torch
 import keynet.layer
 import keynet.fiberbundle
 from keynet.util import blockview
+import keynet.sparse
+import keynet.torch
 
 
 class KeyedModel(object):
@@ -54,7 +56,6 @@ class KeyedModel(object):
                                                    in_channels=m.in_channels,
                                                    kernel_size=m.kernel_size,
                                                    stride=m.stride)
-                                                   stride=m.stride,
                 d_name_to_keyedmodule[k] = m_keyed
                 if '%s_bn' % k not in layernames:                
                     d_name_to_keyedmodule[k] = d_name_to_keyedmodule[k].key(m.weight, m.bias, layerkey[k]['A'], layerkey[k]['Ainv'])
@@ -117,9 +118,10 @@ class KeyedModel(object):
     
 
 class KeyedSensor(keynet.layer.KeyedLayer):
-    def __init__(self, inshape, keypair):
-        super(KeyedSensor, self).__init__()
+    def __init__(self, inshape, keypair, reorder=None):
+        super(KeyedSensor, self).__init__() 
         (self._encryptkey, self._decryptkey) = keypair
+        self._reorderkey = reorder.transpose() if reorder is not None else None
         self._inshape = inshape
         self._tensor = None
         
@@ -141,7 +143,12 @@ class KeyedSensor(keynet.layer.KeyedLayer):
             return self
 
     def image(self):
-        img = dehomogenize(self._tensor).reshape(1, *self._inshape)  if self.isencrypted() else self._tensor  # 1x(C*H*W+1) -> 1xCxHxW
+        if self.isencrypted():
+            x = self._tensor if self._reorderkey is None else self._reorderkey.torchdot(self._tensor.t()).t()
+            img = dehomogenize(x).reshape(1, *self._inshape)
+        else:
+            img = self._tensor
+
         img = np.squeeze(img.permute(2,3,1,0).numpy())  # 1xCxHxW -> HxWxC
         colorspace = 'float' if img.dtype == np.float32 else None
         colorspace = 'rgb' if img.dtype == np.uint8 and img.shape[2] == 3 else colorspace
@@ -220,15 +227,18 @@ class KeyPair(object):
     
     def tiled_block_permutation(self, tilesize): 
         assert tilesize is not None, "invalid tilesize"
-        f_key = lambda layername, outshape:(sparse_block_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix) if 'relu' not in layername else 
-                                            sparse_block_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix))
-        f_order = self.identity()        
-        return lambda layername, outshape: (A.matmul(B) for (A,B) in zip(f_key(layername, outshape), f_order(layername, outshape)))
+        
+        def _f_reorder(outshape):
+            B_channel_to_block = self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True))
+            return B_channel_to_block
+        
+        def _f_keypair(layername, outshape):
+            (A, Ainv) = sparse_block_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize*tilesize, tiler=self._SparseTiledMatrix)
+            B_channel_to_block = _f_reorder(outshape)            
+            return (A.matmul(B_channel_to_block), Ainv.transpose().matmul(B_channel_to_block).transpose())
+        
+        return (_f_keypair, _f_reorder)
 
-    # specially handle the input layer to transform and untrainsform the input
-    # typecast toeplitz matrix as SparseMatrix and allow multiplication of SparseMatrix and SparseTiledMatrix, which requires converting sparsetiled to coo, multiplying then compressing
-    # need to parallelize the coo conversion
-    
     
 def keygen(format, backend, alpha=None, beta=0, tilesize=None):
     formats = set(['identity', 'permutation', 'stochastic', 'tiled-identity', 'tiled-permutation', 'tiled-stochastic', 'tiled-blockpermutation'])
@@ -274,26 +284,26 @@ def StochasticKeynet(inshape, net, alpha, beta=0, do_output_encryption=False):
     return Keynet(inshape, net, 'stochastic', 'scipy', do_output_encryption, alpha=alpha, beta=beta)    
 
 
-def IdentityTiledKeynet(inshape, net, tilesize, n_processes=1):
+def TiledIdentityKeynet(inshape, net, tilesize, n_processes=1):
     return Keynet(inshape, net, 'tiled-identity', 'scipy', do_output_encryption=False, tilesize=tilesize, n_processes=n_processes)
 
 
-def PermutationTiledKeynet(inshape, net, tilesize, do_output_encryption=False, n_processes=1):
+def TiledPermutationKeynet(inshape, net, tilesize, do_output_encryption=False, n_processes=1):
     return Keynet(inshape, net, 'tiled-permutation', 'scipy', do_output_encryption, tilesize=tilesize, n_processes=n_processes)
 
 
-def StochasticTiledKeynet(inshape, net, tilesize, alpha, beta=0, do_output_encryption=False, n_processes=1):
+def TiledStochasticKeynet(inshape, net, tilesize, alpha, beta=0, do_output_encryption=False, n_processes=1):
     return Keynet(inshape, net, 'tiled-stochastic', 'scipy', do_output_encryption, tilesize=tilesize, alpha=alpha, beta=beta, n_processes=n_processes)
 
 
-def StochasticTiledKeySensor(inshape, tilesize, alpha, beta=0):
+def TiledStochasticKeySensor(inshape, tilesize, alpha, beta=0):
     f_keypair = keygen('tiled-stochastic', 'scipy', alpha, beta, tilesize)
     return KeyedSensor(inshape, f_keypair('input', inshape))
 
 
-def BlockPermutationTiledKeySensor(inshape, tilesize):
-    f_keypair = keygen('tiled-blockpermutation', 'scipy', tilesize=tilesize)
-    return KeyedSensor(inshape, f_keypair('input', inshape))
+def TiledBlockPermutationKeySensor(inshape, tilesize):
+    (f_keypair, f_reorder) = keygen('tiled-blockpermutation', 'scipy', tilesize=tilesize)
+    return KeyedSensor(inshape, f_keypair('input', inshape), reorder=f_reorder(inshape))
 
 
 def OpticalFiberBundleKeynet(inshape, net):

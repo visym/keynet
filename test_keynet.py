@@ -1,4 +1,3 @@
-from numpy.linalg import multi_dot 
 import numpy as np
 import scipy.linalg
 import PIL
@@ -8,7 +7,7 @@ from torch import nn
 import torch.nn.functional as F
 import keynet.sparse
 from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse
-from keynet.sparse import sparse_generalized_stochastic_block_matrix_with_inverse, sparse_identity_matrix
+from keynet.sparse import sparse_generalized_stochastic_block_matrix_with_inverse, sparse_identity_matrix, sparse_block_permutation_tiled_matrix_with_inverse, sparse_channelorder_to_blockorder
 from keynet.torch import homogenize, dehomogenize, homogenize_matrix
 from keynet.torch import sparse_toeplitz_conv2d
 from keynet.torch import sparse_toeplitz_avgpool2d
@@ -173,6 +172,27 @@ def test_sparse_tiled_matrix():
     print('[test_block_tiled]:  PASSED')
     
 
+def show_channelorder_to_blockorder():
+    im = vipy.image.Image('owl.jpg').greyscale().resize(32, 32, interp='nearest')
+    img = im.array()
+    img = np.expand_dims(img, 0)  # HxWxC -> 1xCxHxW
+    img = np.expand_dims(img, 0)  # HxWxC -> 1xCxHxW    
+    x_torch = homogenize(torch.as_tensor(img))
+    x_numpy = np.array(x_torch).reshape(32*32+1, 1)
+    
+    (A,Ainv) = sparse_block_permutation_tiled_matrix_with_inverse(np.prod((1,32,32))+1, 16*16)
+    C = sparse_channelorder_to_blockorder((1,32,32), 16, True)
+
+    assert np.allclose(C.dot(C.transpose()).todense(), np.eye(32*32+1))
+
+    y_numpy = C.transpose().dot(A.dot(C.dot(x_numpy)))
+    y_torch = torch.as_tensor(y_numpy).reshape(1, 32*32+1)
+    y = np.array(dehomogenize(y_torch))
+    
+    return vipy.image.Image(array=y.reshape(32,32), colorspace='float').resize(256,256,interp='nearest').show()
+    #return vipy.image.Image(array=np.array(A.tocoo().todense()), colorspace='float').show()
+
+
 def test_sparse_toeplitz_conv2d():
     stride = 2
     (N,C,U,V) = (2,1,8,16)
@@ -291,17 +311,17 @@ def test_keynet_constructor():
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet_constructor]:  StochasticKeynet (alpha=2) PASSED')    
     
-    (sensor, knet) = keynet.system.IdentityTiledKeynet(inshape, net, 27, n_processes=2)
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 27, n_processes=2)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     knet.num_parameters()
-    print('[test_keynet_constructor]:  IdentityTiledKeynet PASSED')
+    print('[test_keynet_constructor]:  TiledIdentityKeynet PASSED')
         
-    (sensor, knet) = keynet.system.PermutationTiledKeynet(inshape, net, 27, do_output_encryption=False)
+    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, 27, do_output_encryption=False)
     yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     knet.num_parameters()    
-    print('[test_keynet_constructor]:  PermutationTiledKeynet PASSED')
+    print('[test_keynet_constructor]:  TiledPermutationKeynet PASSED')
         
     inshape = (3,32,32)
     net = keynet.cifar10.AllConvNet()    
@@ -313,11 +333,11 @@ def test_keynet_constructor():
     assert np.allclose(yh, y, atol=1E-5)    
     print('[test_keynet_constructor]:  IdentityKeynet (allconvnet) PASSED')
 
-    (sensor, knet) = keynet.system.IdentityTiledKeynet(inshape, net, 2048, n_processes=8)    
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 2048, n_processes=8)    
     yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
     assert np.allclose(yh, y, atol=1E-5)    
-    print('[test_keynet_constructor]:  IdentityTiledKeynet (allconvnet) PASSED')
+    print('[test_keynet_constructor]:  TiledIdentityKeynet (allconvnet) PASSED')
 
     print('[test_keynet_constructor]:  PASSED')    
     
@@ -356,18 +376,18 @@ def test_keynet_mnist():
 
     # IdentityTiled keynet
     inshape = (1,28,28)
-    (sensor, knet) = keynet.system.IdentityTiledKeynet(inshape, net, tilesize=32)    
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, tilesize=32)    
     yh_identity = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
     assert(np.allclose(np.array(y[0]), yh_identity))
-    print('[test_keynet_mnist]:  IdentityTiledKeynet: passed')
-    print('[test_keynet_mnist]:  IdentityTiledKey parameters: %d' % knet.num_parameters())
+    print('[test_keynet_mnist]:  TiledIdentityKeynet: passed')
+    print('[test_keynet_mnist]:  TiledIdentityKey parameters: %d' % knet.num_parameters())
     
     # Permutation KeyLeNet
-    (sensor, knet) = keynet.system.PermutationTiledKeynet(inshape, net, tilesize=32)    
+    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, tilesize=32)    
     yh = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
     assert(np.allclose(np.array(y[0]), yh))
-    print('[test_keynet_mnist]:  PermutationTiledKeynet: passed')
-    print('[test_keynet_mnist]:  PermutationTiledKey parameters: %d' % knet.num_parameters())
+    print('[test_keynet_mnist]:  TiledPermutationKeynet: passed')
+    print('[test_keynet_mnist]:  TiledPermutationKeynet parameters: %d' % knet.num_parameters())
 
     # Stochastic
     (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=2, beta=2)    
@@ -380,8 +400,8 @@ def test_keynet_mnist():
     (sensor, knet) = keynet.system.StochasticTiledKeynet(inshape, net, alpha=2, beta=2, tilesize=32)    
     yh = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
     assert(np.allclose(np.array(y[0]), yh))
-    print('[test_keynet_mnist]:  StochasticTiledKeynet: passed')
-    print('[test_keynet_mnist]:  StochasticTiledKeynet parameters: %d' % knet.num_parameters())    
+    print('[test_keynet_mnist]:  TiledStochasticKeynet: passed')
+    print('[test_keynet_mnist]:  TiledStochasticKeynet parameters: %d' % knet.num_parameters())    
     return 
 
     
