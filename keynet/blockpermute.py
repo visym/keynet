@@ -1,8 +1,5 @@
 import scipy.sparse
 import numpy as np
-import math
-import PIL
-from PIL import Image
 
 
 def block_permute(img, blockshape, seed=None):

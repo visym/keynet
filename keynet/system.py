@@ -124,6 +124,7 @@ class KeyedSensor(keynet.layer.KeyedLayer):
         self._reorderkey = reorder.transpose() if reorder is not None else None
         self._inshape = inshape
         self._tensor = None
+        self._im = None
         
     def __repr__(self):
         return str('<KeySensor: height=%d, width=%d, channels=%d>' % (self._inshape[1], self._inshape[2], self._inshape[0]))
@@ -132,7 +133,8 @@ class KeyedSensor(keynet.layer.KeyedLayer):
         im = vipy.image.Image(imgfile).resize(height=self._inshape[1], width=self._inshape[2])
         if self._inshape[0] == 1:
             im = im.grey()
-        self._tensor = im.float().torch().contiguous()
+        self._tensor = im.float().torch().contiguous()  # HxWxC -> 1xCxHxW
+        self._im = im
         return self
 
     def tensor(self, x=None):
@@ -143,17 +145,11 @@ class KeyedSensor(keynet.layer.KeyedLayer):
             return self
 
     def image(self):
+        x_torch = self._tensor        
         if self.isencrypted():
-            x = self._tensor if self._reorderkey is None else self._reorderkey.torchdot(self._tensor.t()).t()
-            img = dehomogenize(x).reshape(1, *self._inshape)
-        else:
-            img = self._tensor
-
-        img = np.squeeze(img.permute(2,3,1,0).numpy())  # 1xCxHxW -> HxWxC
-        colorspace = 'float' if img.dtype == np.float32 else None
-        colorspace = 'rgb' if img.dtype == np.uint8 and img.shape[2] == 3 else colorspace
-        colorspace = 'lum' if img.dtype == np.uint8 and img.shape[2] == 1 else colorspace
-        return vipy.image.Image(array=img, colorspace=colorspace)
+            x_torch = x_torch if self._reorderkey is None else self._reorderkey.torchdot(x_torch.t()).t()
+            x_torch = dehomogenize(x_torch).reshape(1, *self._inshape)
+        return self._im.fromtorch(x_torch)  # 1xCxHxW -> HxWxC
 
     def keypair(self):
         return (self._encryptkey, self._decryptkey)
@@ -173,7 +169,7 @@ class KeyedSensor(keynet.layer.KeyedLayer):
         self.tensor(x_raw) 
         assert self.isloaded(), "Load image first"
         self.W = self._encryptkey    # Used in super().forward()
-        self._tensor = super(KeyedSensor, self).forward(homogenize(self._tensor)) if not self.isencrypted() else self._tensor
+        self._tensor = super(KeyedSensor, self).forward(homogenize(self._tensor)) if not self.isencrypted() else self._tensor  
         return self
         
     def decrypt(self, x_cipher=None):
