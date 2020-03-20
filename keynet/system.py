@@ -214,17 +214,17 @@ class KeyPair(object):
                                             tuple(self._SparseMatrix(m) for m in sparse_generalized_permutation_matrix_with_inverse(np.prod(outshape)+1, beta)))
     def tiled_identity(self, tilesize):
         assert tilesize is not None, "invalid tilesize"
-        return lambda layername, outshape: (A.parallel(self._n_processes) for A in sparse_identity_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix))
+        return lambda layername, outshape: tuple(A.parallel(self._n_processes) for A in sparse_identity_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix))
     
     def tiled_permutation(self, tilesize):
         assert tilesize is not None, "invalid tilesize"
-        return lambda layername, outshape: (A.parallel(self._n_processes) for A in sparse_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix))
+        return lambda layername, outshape: tuple(A.parallel(self._n_processes) for A in sparse_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix))
 
     def tiled_stochastic(self, alpha, beta, tilesize):    
         assert tilesize is not None, "invalid tilesize"
         assert alpha is not None and beta is not None, "Invalid (alpha, beta)"
-        return lambda layername, outshape: ((A.parallel(self._n_processes) for A in sparse_generalized_stochastic_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, alpha, beta, tiler=self._SparseTiledMatrix)) if 'relu' not in layername else 
-                                            (A.parallel(self._n_processes) for A in sparse_generalized_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, beta, tiler=self._SparseTiledMatrix)))
+        return lambda layername, outshape: (tuple(A.parallel(self._n_processes) for A in sparse_generalized_stochastic_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, alpha, beta, tiler=self._SparseTiledMatrix)) if 'relu' not in layername else 
+                                            tuple(A.parallel(self._n_processes) for A in sparse_generalized_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, beta, tiler=self._SparseTiledMatrix)))
     
     def tiled_block_permutation(self, tilesize): 
         assert tilesize is not None, "invalid tilesize"
