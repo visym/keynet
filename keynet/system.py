@@ -11,8 +11,10 @@ from vipy.util import try_import
 from keynet.torch import homogenize_matrix, scipy_coo_to_torch_sparse
 from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse, sparse_identity_matrix
 from keynet.sparse import sparse_stochastic_matrix_with_inverse, sparse_generalized_stochastic_matrix_with_inverse, sparse_generalized_permutation_matrix_with_inverse, sparse_identity_matrix_like
-from keynet.sparse import sparse_permutation_tiled_matrix_with_inverse, sparse_identity_tiled_matrix_with_inverse, sparse_generalized_permutation_tiled_matrix_with_inverse
-from keynet.sparse import sparse_generalized_stochastic_tiled_matrix_with_inverse, sparse_block_permutation_tiled_matrix_with_inverse, sparse_channelorder_to_blockorder
+from keynet.sparse import sparse_block_diagonal_tiled_permutation_matrix_with_inverse, sparse_diagonal_tiled_identity_matrix_with_inverse
+from keynet.sparse import sparse_block_diagonal_tiled_generalized_permutation_matrix_with_inverse
+from keynet.sparse import sparse_block_diagonal_tiled_generalized_stochastic_matrix_with_inverse
+from keynet.sparse import sparse_block_permutation_tiled_identity_matrix_with_inverse, sparse_channelorder_to_blockorder
 import keynet.torch
 import keynet.layer
 import keynet.fiberbundle
@@ -90,7 +92,13 @@ class KeyedModel(object):
         self._keynet = nn.Sequential(d_name_to_keyedmodule)
         self._embeddingkey = layerkey['output']
         self._imagekey = layerkey['input']
-        
+
+    def __getattr__(self, layername):
+        if hasattr(self._keynet, layername):
+            return self._keynet.__getattr__(layername)
+        else:
+            raise ValueError('Invalid layer name "%s"' % layername)
+    
     def forward(self, img_cipher, outkey=None):
         outkey = outkey if outkey is not None else self.embeddingkey()
         y_cipher = self._keynet.forward(img_cipher)
@@ -115,7 +123,7 @@ class KeyedModel(object):
 
     def num_parameters(self):
         return sum([c.nnz() for (k,c) in self._keynet.named_children() if hasattr(c, 'nnz')])
-    
+
 
 class KeyedSensor(keynet.layer.KeyedLayer):
     def __init__(self, inshape, keypair, reorder=None):
@@ -194,9 +202,8 @@ class OpticalFiberBundle(KeyedSensor):
 
 class KeyPair(object):
     def __init__(self, backend='scipy', n_processes=1):
-        self._SparseMatrix = keynet.sparse.SparseMatrix if backend=='scipy' else keynet.torch.SparseMatrix
-        self._SparseTiledMatrix = keynet.sparse.SparseTiledMatrix if backend=='scipy' else keynet.torch.SparseTiledMatrix
-        self._n_processes = n_processes
+        self._SparseMatrix = lambda *args, **kw: keynet.sparse.SparseMatrix(*args, **kw, n_processes=n_processes) if backend=='scipy' else keynet.torch.SparseMatrix(*args, **kw, n_processes=n_processes)
+        self._SparseTiledMatrix = lambda *args, **kw: keynet.sparse.SparseTiledMatrix(*args, **kw, n_processes=n_processes) if backend=='scipy' else keynet.torch.SparseTiledMatrix(*args, **kw, n_processes=n_processes)
         
     def identity(self):
         return lambda layername, outshape: (self._SparseMatrix(sparse_identity_matrix(np.prod(outshape)+1).tocoo()),
@@ -208,30 +215,29 @@ class KeyPair(object):
         assert alpha is not None and beta is not None, "Invalid (alpha, beta)"
         return lambda layername, outshape: (tuple(self._SparseMatrix(m) for m in sparse_generalized_stochastic_matrix_with_inverse(np.prod(outshape)+1, alpha, beta)) if 'relu' not in layername else 
                                             tuple(self._SparseMatrix(m) for m in sparse_generalized_permutation_matrix_with_inverse(np.prod(outshape)+1, beta)))
-    def tiled_identity(self, tilesize):
+    def diagonal_tiled_identity_matrix(self, tilesize):
         assert tilesize is not None, "invalid tilesize"
-        return lambda layername, outshape: tuple(A.parallel(self._n_processes) for A in sparse_identity_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix))
+        return lambda layername, outshape: sparse_diagonal_tiled_identity_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix)
     
-    def tiled_permutation(self, tilesize):
+    def block_diagonal_tiled_permutation_matrix(self, tilesize):
         assert tilesize is not None, "invalid tilesize"
-        return lambda layername, outshape: tuple(A.parallel(self._n_processes) for A in sparse_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix))
+        return lambda layername, outshape: sparse_block_diagonal_tiled_permutation_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix)
 
-    def tiled_stochastic(self, alpha, beta, tilesize):    
+    def block_diagonal_tiled_stochastic_matrix(self, alpha, beta, tilesize):    
         assert tilesize is not None, "invalid tilesize"
         assert alpha is not None and beta is not None, "Invalid (alpha, beta)"
-        return lambda layername, outshape: (tuple(A.parallel(self._n_processes) for A in sparse_generalized_stochastic_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, alpha, beta, tiler=self._SparseTiledMatrix)) if 'relu' not in layername else 
-                                            tuple(A.parallel(self._n_processes) for A in sparse_generalized_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, beta, tiler=self._SparseTiledMatrix)))
+        return lambda layername, outshape: (sparse_block_diagonal_tiled_generalized_stochastic_matrix_with_inverse(np.prod(outshape)+1, tilesize, alpha, beta, tiler=self._SparseTiledMatrix) if 'relu' not in layername else 
+                                            sparse_block_diagonal_tiled_generalized_permutation_matrix_with_inverse(np.prod(outshape)+1, tilesize, beta, tiler=self._SparseTiledMatrix))
     
-    def tiled_block_permutation(self, tilesize): 
+    def block_permutation_tiled_identity_matrix(self, tilesize): 
         assert tilesize is not None, "invalid tilesize"
         
         def _f_reorder(outshape):
-            B_channel_to_block = self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True)).parallel(self._n_processes)
+            B_channel_to_block = self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True))
             return B_channel_to_block
         
         def _f_keypair(layername, outshape):
-            (A, Ainv) = sparse_block_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize*tilesize, tiler=self._SparseTiledMatrix)
-            (A, Ainv) = (A.parallel(self._n_processes), Ainv.parallel(self._n_processes))
+            (A, Ainv) = sparse_block_permutation_tiled_identity_matrix_with_inverse(np.prod(outshape)+1, tilesize*tilesize, tiler=self._SparseTiledMatrix)
             B_channel_to_block = _f_reorder(outshape)            
             return (A.matmul(B_channel_to_block), Ainv.transpose().matmul(B_channel_to_block).transpose())
         
@@ -252,13 +258,13 @@ def keygen(format, backend, alpha=None, beta=0, tilesize=None, n_processes=1):
     elif format == 'stochastic':
         return keypair.stochastic(alpha, beta)
     elif format == 'tiled-identity':
-        return keypair.tiled_identity(tilesize)
+        return keypair.diagonal_tiled_identity_matrix(tilesize)
     elif format == 'tiled-permutation':
-        return keypair.tiled_permutation(tilesize)            
+        return keypair.block_diagonal_tiled_permutation_matrix(tilesize)            
     elif format == 'tiled-stochastic':
-        return keypair.tiled_stochastic(alpha, beta, tilesize)                
+        return keypair.block_diagonal_tiled_stochastic_matrix(alpha, beta, tilesize)                
     elif format == 'tiled-blockpermutation':
-        return keypair.tiled_block_permutation(tilesize)
+        return keypair.block_permutation_tiled_identity_matrix(tilesize)
     else:
         raise ValueError("Invalid format '%s' - must be in '%s'" % (format, str(formats)))
 

@@ -6,10 +6,6 @@ import keynet.torch
 import keynet.sparse
 from keynet.torch import homogenize, dehomogenize
 from keynet.torch import homogenize_matrix, scipy_coo_to_torch_sparse
-from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse, sparse_identity_matrix
-from keynet.sparse import sparse_stochastic_matrix_with_inverse, sparse_generalized_stochastic_matrix_with_inverse, sparse_generalized_permutation_matrix_with_inverse, sparse_identity_matrix_like
-from keynet.sparse import sparse_permutation_tiled_matrix_with_inverse, sparse_identity_tiled_matrix_with_inverse, sparse_generalized_permutation_tiled_matrix_with_inverse
-from keynet.sparse import sparse_generalized_stochastic_tiled_matrix_with_inverse
 from keynet.sparse import is_scipy_sparse, sparse_toeplitz_avgpool2d
 import vipy
 
@@ -41,6 +37,9 @@ class KeyedLayer(nn.Module):
     def nnz(self):
         assert self.W is not None, "Layer not keyed"
         return self.W.nnz()
+
+    def toimage(self, mindim=256, showdim=1024):
+        return keynet.sparse.spy(self.W, mindim, showdim)
 
     
 class KeyedConv2d(KeyedLayer):

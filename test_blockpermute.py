@@ -55,7 +55,6 @@ def test_hierarchical_block_permutation():
     img_permuted = hierarchical_block_permute(im.array(), num_blocks=(2,2), permute_at_level=[4,5], seed=42)
     P = hierarchical_block_permutation_matrix(im.array().shape, num_blocks=(2,2), permute_at_level=[4,5], seed=42)
 
-    import pdb; pdb.set_trace()
     assert np.allclose(P.dot(im.array().flatten()), img_permuted.flatten(), atol=1E-5)
     print('[test_blockpermute]: hierarchical_block_permutation  PASSED')
     

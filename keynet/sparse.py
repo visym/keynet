@@ -20,6 +20,7 @@ from collections import defaultdict
 from keynet.dense import random_positive_definite_matrix, random_doubly_stochastic_matrix
 from keynet.util import blockview
 from joblib import Parallel, delayed
+import vipy
 
 
 def _parallel_sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1, n_processes=1):
@@ -100,8 +101,8 @@ def sparse_toeplitz_avgpool2d(inshape, filtershape, stride):
 
 def sparse_channelorder_to_blockorder(shape, blockshape, homogenize=False):
     (C,H,W) = shape
-    img_channelorder = np.array(range(0, H*W)).reshape(H,W)
-    img_blockorder = blockview(img_channelorder, blockshape).flatten()
+    img_channelorder = np.array(range(0, H*W)).reshape(H,W)  # HxW, img[0:H] == first row 
+    img_blockorder = blockview(img_channelorder, blockshape).flatten()  # (H//B)x(W//B)xBxB, img[0:B*B] == first block
     (rows, cols, vals) = ([], [], [])
     for c in range(0,C):
         rows.extend(np.array(range(0, H*W)) + c*H*W)
@@ -251,6 +252,7 @@ def sparse_generalized_stochastic_matrix_with_inverse(n, alpha, beta):
     
 
 def sparse_positive_definite_block_diagonal_with_inverse(n, m, dtype=np.float32):
+    """Return nxn matrix with mxm blocks on main diagonal, each block is a random posiitve definite matrix"""
     m = np.minimum(n,m)
     B = [random_positive_definite_matrix(m,dtype) for j in np.arange(0,n-m,m)]
     B = B + [random_positive_definite_matrix(n-len(B)*m, dtype)]
@@ -383,7 +385,7 @@ class SparseMatrix(object):
         return self
 
     def tocoo(self):
-        return self._matrix.tocoo()
+        return self._matrix.tocoo() if is_scipy_sparse(self._matrix) else scipy.sparse.coo_matrix(self._matrix)
 
     def ascsr(self):
         self._matrix = self._matrix.tocsr()
@@ -603,35 +605,57 @@ class SparseTiledMatrix(SparseMatrix):
 
 
     
-def sparse_identity_tiled_matrix_with_inverse(N, tilesize, tiler=SparseTiledMatrix):
+def sparse_diagonal_tiled_identity_matrix_with_inverse(N, tilesize, tiler=SparseTiledMatrix):
+    """(NxN) identity matrix, with one (tilesize, tilesize) identity matrix repeated along main diagonal"""
     (B, Binv) = (sparse_identity_matrix(tilesize), sparse_identity_matrix(tilesize))
     return (tiler(shape=(N,N), tile_to_blkdiag=B.todense(), tilesize=tilesize),
             tiler(shape=(N,N), tile_to_blkdiag=Binv.todense(), tilesize=tilesize))
 
 
-def sparse_permutation_tiled_matrix_with_inverse(N, tilesize, tiler=SparseTiledMatrix):
+def sparse_block_diagonal_tiled_permutation_matrix_with_inverse(N, tilesize, tiler=SparseTiledMatrix):
+    """(NxN) block diagonal matrix with one (tilesize x tilesize) permutation matrix repeated along main diagonal"""
     (B, Binv) = sparse_permutation_matrix_with_inverse(tilesize)
     return (tiler(shape=(N,N), tile_to_blkdiag=B.todense(), tilesize=tilesize),
             tiler(shape=(N,N), tile_to_blkdiag=Binv.todense(), tilesize=tilesize))
 
 
-def sparse_generalized_permutation_tiled_matrix_with_inverse(N, tilesize, beta, tiler=SparseTiledMatrix):
+def sparse_block_diagonal_tiled_generalized_permutation_matrix_with_inverse(N, tilesize, beta, tiler=SparseTiledMatrix):
+    """(NxN) block diagonal matrix with one (tilesize, tilesize) generalized permutation matrix repeated along main diagonal""" 
     (B, Binv) = sparse_generalized_permutation_matrix_with_inverse(tilesize, beta)
     return (tiler(shape=(N,N), tile_to_blkdiag=B.todense(), tilesize=tilesize),
             tiler(shape=(N,N), tile_to_blkdiag=Binv.todense(), tilesize=tilesize))
 
 
-def sparse_generalized_stochastic_tiled_matrix_with_inverse(N, tilesize, alpha, beta=0, tiler=SparseTiledMatrix):
+def sparse_block_diagonal_tiled_generalized_stochastic_matrix_with_inverse(N, tilesize, alpha, beta=0, tiler=SparseTiledMatrix):
+    """(NxN) block diagonal matrix with one (tilesize, tilesize) generalized stochastic matrix repeated along main diagonal""" 
     (B, Binv) = sparse_generalized_stochastic_matrix_with_inverse(tilesize, alpha, beta)
     return (tiler(shape=(N,N), tile_to_blkdiag=B.todense(), tilesize=tilesize),
             tiler(shape=(N,N), tile_to_blkdiag=Binv.todense(), tilesize=tilesize))
 
 
-def sparse_block_permutation_tiled_matrix_with_inverse(squareshape, tilesize, tiler=SparseTiledMatrix):
+def sparse_block_permutation_tiled_identity_matrix_with_inverse(squareshape, tilesize, tiler=SparseTiledMatrix):
+    """(NxN) permutation matrix with every non-overlapping (tilesize, tilesize) submatrix as either identity or zero"""
     (P, Pinv) = sparse_block_permutation_matrix_with_inverse(squareshape, tilesize)
     return (tiler(shape=(squareshape, squareshape), coo_matrix=P.tocoo(), tilesize=tilesize),
             tiler(shape=(squareshape, squareshape), coo_matrix=P.tocoo(), tilesize=tilesize).transpose())
 
 
+def spy(A, mindim=256, showdim=1024):
+    """Visualize sparse matrix A"""
+    scale = float(mindim) / min(A.shape)
+    (H, W) = np.ceil(np.array(A.shape)*scale)
+    
+    A = A.tocoo()
+
+    n = 1.0 / scale    
+    d_blockidx_to_vals = defaultdict(list)
+    for (i,j,v) in zip(A.row, A.col, A.data):
+        d_blockidx_to_vals[ (int(i//n), int(j//n)) ].append(v)
+
+    A_spy = np.zeros( (int(H)+1, int(W)+1), dtype=np.float32)
+    for ((i,j), v) in d_blockidx_to_vals.items():
+        A_spy[i,j] = np.mean(v)
+
+    return vipy.image.Image(array=A_spy, colorspace='float').mat2gray().maxdim(showdim, interp='nearest').jet()
 
 

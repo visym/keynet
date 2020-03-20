@@ -6,8 +6,12 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import keynet.sparse
-from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse
-from keynet.sparse import sparse_generalized_stochastic_block_matrix_with_inverse, sparse_identity_matrix, sparse_block_permutation_tiled_matrix_with_inverse, sparse_channelorder_to_blockorder
+from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse, sparse_identity_matrix
+from keynet.sparse import sparse_stochastic_matrix_with_inverse, sparse_generalized_stochastic_matrix_with_inverse, sparse_generalized_permutation_matrix_with_inverse, sparse_identity_matrix_like
+from keynet.sparse import sparse_block_diagonal_tiled_permutation_matrix_with_inverse, sparse_diagonal_tiled_identity_matrix_with_inverse
+from keynet.sparse import sparse_block_diagonal_tiled_generalized_permutation_matrix_with_inverse
+from keynet.sparse import sparse_block_diagonal_tiled_generalized_stochastic_matrix_with_inverse
+from keynet.sparse import sparse_block_permutation_tiled_identity_matrix_with_inverse, sparse_channelorder_to_blockorder
 from keynet.torch import homogenize, dehomogenize, homogenize_matrix
 from keynet.sparse import sparse_toeplitz_conv2d
 from keynet.sparse import sparse_toeplitz_avgpool2d
@@ -184,7 +188,7 @@ def show_channelorder_to_blockorder():
     x_torch = homogenize(torch.as_tensor(img))
     x_numpy = np.array(x_torch).reshape(32*32+1, 1)
     
-    (A,Ainv) = sparse_block_permutation_tiled_matrix_with_inverse(np.prod((1,32,32))+1, 16*16)
+    (A,Ainv) = sparse_block_permutation_identity_tiled_matrix_with_inverse(np.prod((1,32,32))+1, 16*16)
     C = sparse_channelorder_to_blockorder((1,32,32), 16, True)
 
     assert np.allclose(C.dot(C.transpose()).todense(), np.eye(32*32+1))
