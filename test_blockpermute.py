@@ -1,5 +1,5 @@
 import numpy as np
-from keynet.blockpermute import block_permute, hierarchical_block_permute
+from keynet.blockpermute import block_permute, hierarchical_block_permute, hierarchical_block_permutation_matrix
 import vipy.image
 
 
@@ -50,3 +50,12 @@ def show_global_hierarchical_block_permutation_grey_2x3(imgfile='owl.jpg'):
     vipy.image.Image(array=img_permuted, colorspace='float').show()
     
 
+def test_hierarchical_block_permutation():
+    im = vipy.image.Image('owl.jpg').resize(512, 512, interp='nearest')
+    img_permuted = hierarchical_block_permute(im.array(), num_blocks=(2,2), permute_at_level=[4,5], seed=42)
+    P = hierarchical_block_permutation_matrix(im.array().shape, num_blocks=(2,2), permute_at_level=[4,5], seed=42)
+
+    import pdb; pdb.set_trace()
+    assert np.allclose(P.dot(im.array().flatten()), img_permuted.flatten(), atol=1E-5)
+    print('[test_blockpermute]: hierarchical_block_permutation  PASSED')
+    

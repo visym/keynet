@@ -14,7 +14,6 @@ from keynet.sparse import sparse_toeplitz_avgpool2d
 from keynet.util import torch_avgpool2d_in_scipy, torch_conv2d_in_scipy
 from keynet.dense import uniform_random_diagonal_matrix, random_positive_definite_matrix
 import keynet.util
-import keynet.blockpermute
 import keynet.mnist
 import keynet.cifar10
 import keynet.torch
