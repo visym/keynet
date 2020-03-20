@@ -5,12 +5,12 @@ import numpy as np
 import keynet.torch
 import keynet.sparse
 from keynet.torch import homogenize, dehomogenize
-from keynet.torch import homogenize_matrix, sparse_toeplitz_conv2d, sparse_toeplitz_avgpool2d, scipy_coo_to_torch_sparse
+from keynet.torch import homogenize_matrix, scipy_coo_to_torch_sparse
 from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse, sparse_identity_matrix
 from keynet.sparse import sparse_stochastic_matrix_with_inverse, sparse_generalized_stochastic_matrix_with_inverse, sparse_generalized_permutation_matrix_with_inverse, sparse_identity_matrix_like
 from keynet.sparse import sparse_permutation_tiled_matrix_with_inverse, sparse_identity_tiled_matrix_with_inverse, sparse_generalized_permutation_tiled_matrix_with_inverse
 from keynet.sparse import sparse_generalized_stochastic_tiled_matrix_with_inverse
-from keynet.sparse import is_scipy_sparse
+from keynet.sparse import is_scipy_sparse, sparse_toeplitz_avgpool2d
 import vipy
 
 
@@ -25,16 +25,13 @@ class KeyedLayer(nn.Module):
         return self.W.torchdot(x_affine.t()).t()
         
     def key(self, W, A, Ainv):
-        assert isinstance(A, keynet.sparse.SparseMatrix) or isinstance(Ainv, keynet.sparse.SparseMatrix), "Invalid input"
+        assert (W is None or isinstance(W, keynet.sparse.SparseMatrix)) and (isinstance(A, keynet.sparse.SparseMatrix) or isinstance(Ainv, keynet.sparse.SparseMatrix)), "Invalid input"
         if W is not None and A is not None and A is not None:
-            Wh = A.from_scipy_sparse(W) if is_scipy_sparse(W) else A.from_torch_dense(W)            
-            self.W = A.matmul(Wh).matmul(Ainv)
+            self.W = A.matmul(W).matmul(Ainv)
         elif W is not None and A is not None:
-            Wh = A.from_scipy_sparse(W) if is_scipy_sparse(W) else A.from_torch_dense(W)            
-            self.W = A.matmul(Wh)
+            self.W = A.matmul(W)
         elif W is not None and Ainv is not None:
-            Wh = Ainv.from_scipy_sparse(W) if is_scipy_sparse(W) else Ainv.from_torch_dense(W)                        
-            self.W = Wh.matmul(Ainv)
+            self.W = W.matmul(Ainv)
         elif W is None and Ainv is not None and A is not None:
             self.W = A.matmul(Ainv)
         else:
@@ -47,7 +44,7 @@ class KeyedLayer(nn.Module):
 
     
 class KeyedConv2d(KeyedLayer):
-    def __init__(self, inshape, in_channels, out_channels, kernel_size, stride, n_processes=1):
+    def __init__(self, inshape, in_channels, out_channels, kernel_size, stride):
         super(KeyedConv2d, self).__init__()
 
         assert len(kernel_size)==1 or len(kernel_size)==2 and (kernel_size[0] == kernel_size[1]), "Kernel must be square"
@@ -59,7 +56,6 @@ class KeyedConv2d(KeyedLayer):
         self.out_channels = out_channels
         self.inshape = inshape
         assert len(inshape) == 3, "Inshape must be (C,H,W) for the shape of the tensor at the input to this layer"""
-        self._n_processes = n_processes
 
     def extra_repr(self):
         str_shape = ', backend=%s, shape=%s>' % (str(type(self.W)), str(self.W.shape)) if self.W is not None else '>'
@@ -83,7 +79,7 @@ class KeyedConv2d(KeyedLayer):
                 w.shape[1] == self.in_channels and
                 w.shape[2] == self.kernel_size and
                 b.shape[0] == self.out_channels), "Invalid input"
-        W = sparse_toeplitz_conv2d(self.inshape, w.detach().numpy(), bias=b.detach().numpy(), stride=self.stride, n_processes=self._n_processes)   # Expensive
+        W = Ainv.from_torch_conv2d(self.inshape, w, b, self.stride)  # parallelized
         return super(KeyedConv2d, self).key(W, A, Ainv)
 
         
@@ -98,7 +94,7 @@ class KeyedLinear(KeyedLayer):
         return str('<KeyedLinear: in_features=%d, out_features=%d%s>' (self.in_features, self.out_features, str_shape))
         
     def key(self, w, b, A, Ainv):
-        W = homogenize_matrix(w, b).t()  # transposed for right multiply
+        W = Ainv.from_torch_dense(homogenize_matrix(w, b).t())  # transposed for right multiply
         return super(KeyedLinear, self).key(W, A, Ainv)
 
     
@@ -129,7 +125,7 @@ class KeyedAvgpool2d(KeyedLayer):
         return str('<KeyedAvgpool2d: kernel_size=%s, stride=%s%s>' (str(self.kernel_size), str(self.stride), str_shape))
     
     def key(self, A, Ainv):
-        W = sparse_toeplitz_avgpool2d(self.inshape, (self.inshape[0], self.inshape[0], self.kernel_size, self.kernel_size), self.stride)  # Expensive
+        W = Ainv.from_scipy_sparse(sparse_toeplitz_avgpool2d(self.inshape, (self.inshape[0], self.inshape[0], self.kernel_size, self.kernel_size), self.stride))  # Expensive
         return super(KeyedAvgpool2d, self).key(W, A, Ainv)
 
 

@@ -9,8 +9,8 @@ import keynet.sparse
 from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse
 from keynet.sparse import sparse_generalized_stochastic_block_matrix_with_inverse, sparse_identity_matrix, sparse_block_permutation_tiled_matrix_with_inverse, sparse_channelorder_to_blockorder
 from keynet.torch import homogenize, dehomogenize, homogenize_matrix
-from keynet.torch import sparse_toeplitz_conv2d
-from keynet.torch import sparse_toeplitz_avgpool2d
+from keynet.sparse import sparse_toeplitz_conv2d
+from keynet.sparse import sparse_toeplitz_avgpool2d
 from keynet.util import torch_avgpool2d_in_scipy, torch_conv2d_in_scipy
 from keynet.dense import uniform_random_diagonal_matrix, random_positive_definite_matrix
 import keynet.util
@@ -111,8 +111,13 @@ def show_sparse_blockkey(n=32):
 
 def test_sparse_tiled_matrix():
     (U,V) = (8,8)
-    W = keynet.torch.sparse_toeplitz_conv2d( (1,U,V), np.random.rand(1,1,3,3) )    
+    W = sparse_toeplitz_conv2d( (1,U,V), np.random.rand(1,1,3,3) )    
     T = keynet.sparse.SparseTiledMatrix(coo_matrix=W, tilesize=4)
+    assert np.allclose(W.todense().astype(np.float32), T.tocoo().todense(), atol=1E-5)
+
+    (U,V) = (8,8)
+    W = sparse_toeplitz_conv2d( (1,U,V), np.random.rand(1,1,3,3) )    
+    T = keynet.sparse.SparseTiledMatrix(coo_matrix=W, tilesize=4, n_processes=2)
     assert np.allclose(W.todense().astype(np.float32), T.tocoo().todense(), atol=1E-5)
     
     (U,V) = (17,32)
@@ -121,7 +126,7 @@ def test_sparse_tiled_matrix():
     x = torch.tensor(img.reshape(1,U,V))
     x_torch = homogenize(x)
     x_numpy = x_torch.numpy()
-    W_right = keynet.torch.sparse_toeplitz_conv2d( (1,U,V), np.random.rand(1,1,3,3) )
+    W_right = sparse_toeplitz_conv2d( (1,U,V), np.random.rand(1,1,3,3) )
     W_right_dense = W_right.todense()    
 
     T_right = keynet.sparse.SparseTiledMatrix(coo_matrix=W_right, tilesize=U*4)
@@ -143,7 +148,7 @@ def test_sparse_tiled_matrix():
     W2 = T2.tocoo().todense()
     assert np.allclose(W1.dot(W2).flatten(), T1.matmul(T2).tocoo().todense().flatten(), atol=1E-5)
         
-    W2_right = keynet.torch.sparse_toeplitz_conv2d( (1,U,V), np.random.rand(1,1,3,3) )
+    W2_right = sparse_toeplitz_conv2d( (1,U,V), np.random.rand(1,1,3,3) )
     T2_right = keynet.sparse.SparseTiledMatrix(coo_matrix=W2_right, tilesize=T_right.tilesize())    
     T_tight = T_right.matmul(T2_right)
     y = W_right_dense.dot(W2_right.todense()).dot(x_numpy.transpose())
@@ -484,4 +489,4 @@ if __name__ == '__main__':
     test_sparse_matrix()
     test_sparse_tiled_matrix()        
     test_keynet_constructor()
-    test_keynet_mnist()    
+    #test_keynet_mnist()    

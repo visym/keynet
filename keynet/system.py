@@ -8,7 +8,7 @@ import vipy
 from collections import OrderedDict
 from keynet.torch import homogenize, dehomogenize
 from vipy.util import try_import
-from keynet.torch import homogenize_matrix, sparse_toeplitz_conv2d, sparse_toeplitz_avgpool2d, scipy_coo_to_torch_sparse
+from keynet.torch import homogenize_matrix, scipy_coo_to_torch_sparse
 from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse, sparse_identity_matrix
 from keynet.sparse import sparse_stochastic_matrix_with_inverse, sparse_generalized_stochastic_matrix_with_inverse, sparse_generalized_permutation_matrix_with_inverse, sparse_identity_matrix_like
 from keynet.sparse import sparse_permutation_tiled_matrix_with_inverse, sparse_identity_tiled_matrix_with_inverse, sparse_generalized_permutation_tiled_matrix_with_inverse
@@ -22,7 +22,7 @@ import keynet.torch
 
 
 class KeyedModel(object):
-    def __init__(self, net, inshape, inkey, f_layername_to_keypair, do_output_encryption=False, verbose=True, n_processes=1):
+    def __init__(self, net, inshape, inkey, f_layername_to_keypair, do_output_encryption=False, verbose=True):
         # Assign layerkeys using provided lambda function
         net.eval()
         netshape = keynet.torch.netshape(net, inshape)
@@ -197,9 +197,10 @@ class OpticalFiberBundle(KeyedSensor):
     
 
 class KeyPair(object):
-    def __init__(self, backend='scipy'):
+    def __init__(self, backend='scipy', n_processes=1):
         self._SparseMatrix = keynet.sparse.SparseMatrix if backend=='scipy' else keynet.torch.SparseMatrix
         self._SparseTiledMatrix = keynet.sparse.SparseTiledMatrix if backend=='scipy' else keynet.torch.SparseTiledMatrix
+        self._n_processes = n_processes
         
     def identity(self):
         return lambda layername, outshape: (self._SparseMatrix(sparse_identity_matrix(np.prod(outshape)+1).tocoo()),
@@ -213,40 +214,41 @@ class KeyPair(object):
                                             tuple(self._SparseMatrix(m) for m in sparse_generalized_permutation_matrix_with_inverse(np.prod(outshape)+1, beta)))
     def tiled_identity(self, tilesize):
         assert tilesize is not None, "invalid tilesize"
-        return lambda layername, outshape: sparse_identity_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix)
+        return lambda layername, outshape: (A.parallel(self._n_processes) for A in sparse_identity_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix))
     
     def tiled_permutation(self, tilesize):
         assert tilesize is not None, "invalid tilesize"
-        return lambda layername, outshape: sparse_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix)
+        return lambda layername, outshape: (A.parallel(self._n_processes) for A in sparse_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix))
 
     def tiled_stochastic(self, alpha, beta, tilesize):    
         assert tilesize is not None, "invalid tilesize"
         assert alpha is not None and beta is not None, "Invalid (alpha, beta)"
-        return lambda layername, outshape: (sparse_generalized_stochastic_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, alpha, beta, tiler=self._SparseTiledMatrix) if 'relu' not in layername else 
-                                            sparse_generalized_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, beta, tiler=self._SparseTiledMatrix))
+        return lambda layername, outshape: ((A.parallel(self._n_processes) for A in sparse_generalized_stochastic_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, alpha, beta, tiler=self._SparseTiledMatrix)) if 'relu' not in layername else 
+                                            (A.parallel(self._n_processes) for A in sparse_generalized_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize, beta, tiler=self._SparseTiledMatrix)))
     
     def tiled_block_permutation(self, tilesize): 
         assert tilesize is not None, "invalid tilesize"
         
         def _f_reorder(outshape):
-            B_channel_to_block = self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True))
+            B_channel_to_block = self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True)).parallel(self._n_processes)
             return B_channel_to_block
         
         def _f_keypair(layername, outshape):
             (A, Ainv) = sparse_block_permutation_tiled_matrix_with_inverse(np.prod(outshape)+1, tilesize*tilesize, tiler=self._SparseTiledMatrix)
+            (A, Ainv) = (A.parallel(self._n_processes), Ainv.parallel(self._n_processes))
             B_channel_to_block = _f_reorder(outshape)            
             return (A.matmul(B_channel_to_block), Ainv.transpose().matmul(B_channel_to_block).transpose())
         
         return (_f_keypair, _f_reorder)
 
     
-def keygen(format, backend, alpha=None, beta=0, tilesize=None):
+def keygen(format, backend, alpha=None, beta=0, tilesize=None, n_processes=1):
     formats = set(['identity', 'permutation', 'stochastic', 'tiled-identity', 'tiled-permutation', 'tiled-stochastic', 'tiled-blockpermutation'])
     backends = set(['torch', 'scipy'])
     assert format in formats, "Invalid format '%s' - must be in '%s'" % (format, str(formats))
     assert backend in backends, "Invalid backend '%s' - must be in '%s'" % (backend, str(backends))
 
-    keypair = KeyPair(backend)
+    keypair = KeyPair(backend, n_processes)
     if format == 'identity':
         return keypair.identity()
     elif format == 'permutation':
@@ -266,9 +268,9 @@ def keygen(format, backend, alpha=None, beta=0, tilesize=None):
 
     
 def Keynet(inshape, net, format, backend, do_output_encryption=False, verbose=True, alpha=None, beta=None, tilesize=None, n_processes=1):
-    f_keypair = keygen(format, backend, alpha, beta, tilesize)
+    f_keypair = keygen(format, backend, alpha, beta, tilesize, n_processes=n_processes)
     sensor = KeyedSensor(inshape, f_keypair('input', inshape))
-    model = KeyedModel(net, inshape, sensor.key(), f_keypair, do_output_encryption=do_output_encryption, verbose=verbose, n_processes=n_processes)
+    model = KeyedModel(net, inshape, sensor.key(), f_keypair, do_output_encryption=do_output_encryption, verbose=verbose)
     return (sensor, model)
 
 
