@@ -1,69 +1,56 @@
-from numpy.linalg import multi_dot 
+import scipy.sparse
 import numpy as np
 import math
 import PIL
 from PIL import Image
 
 
-def _block_permute(img, blocksize, permsize):
-    """For every non-overlapping block in img of size (blocksize x blocksize), randomly permute the (permsize x permsize) subblocks within this block, preserving order of elements within subblock"""
-    assert(blocksize % permsize == 0)
-    for i in np.arange(0, img.shape[0], blocksize):
-        for j in np.arange(0, img.shape[1], blocksize):
-            subimg = np.copy(img[i:i+blocksize, j:j+blocksize])
-            subblocksize = blocksize // permsize
-            (U,V) = (np.arange(0, blocksize, subblocksize), np.arange(0, blocksize, subblocksize))
-            for (u, u_perm) in zip(U, np.random.permutation(U)):
-                for (v, v_perm) in zip(V, np.random.permutation(V)):
-                    img[i+u:i+u+subblocksize, j+v:j+v+subblocksize] = subimg[u_perm:u_perm+subblocksize, v_perm:v_perm+subblocksize]
-    return img
-
-
-def block_permutation_mask(n, m, minscale=3):
-    """generate an nxn top-down, hierarchical block permutation mask of size mxm down to level index minscale"""
-    assert(n % m == 0)
-    mask = np.arange(0,n*n).reshape( (n,n) ).astype(np.uint32)
-    maxscale = int(np.ceil(math.log(n,m)))
-    for k in reversed(np.arange(minscale, maxscale+1)):
-        mask = _block_permute(mask, np.power(m,k), m)
-    return mask
-
-
-def local_permutation_mask(n, m, minscale, identityscale):
-    """generate an nxn top-down, hierarchical block permutation mask of size mxm down to level index minscale that preserves global block structure for scales above identityscale"""
-    assert(n % m == 0)
-    mask = np.arange(0,n*n).reshape( (n,n) ).astype(np.uint32)
-    maxscale = int(np.ceil(math.log(n,m)))
-    assert(minscale<=maxscale and identityscale<=maxscale)    
-    for k in reversed(np.arange(minscale, maxscale+1)):
-        if k < identityscale:
-            mask = _block_permute(mask, np.power(m,k), m)
-    return mask
-
-
-def identity_permutation_mask(n):
-    return np.arange(0,n*n).reshape( (n,n) ).astype(np.uint32)
-
-
-def global_permutation_mask(n, m, minscale, identityscale):
-    """generate an nxn top-down, hierarchical block permutation mask of size mxm down to level index minscale that preserves global block structure for scales above identityscale"""
-    assert(n % m == 0)
-    mask = np.arange(0,n*n).reshape( (n,n) ).astype(np.uint32)
-    maxscale = int(np.ceil(math.log(n,m)))
-    assert(minscale<=maxscale and identityscale<=maxscale)
-    for k in reversed(np.arange(minscale, maxscale+1)):
-        if k >= identityscale:
-            mask = _block_permute(mask, np.power(m,k), m)
-    return mask
-
-
-def block_permute(img, mask):
-    """Apply permutation mask to color image"""
-    assert(len(img.shape) == 3 and len(mask.shape) == 2 and img.shape[0:2] == mask.shape[0:2])
+def block_permute(img, blockshape):
+    """For every non-overlapping block in img of size (H,W)=blockshape, randomly permute the blocks, preserving the order within the block"""
+    assert img.shape[0] % blockshape[0] == 0 and img.shape[1] % blockshape[1] == 0, "Blocksize must be evenly divisible with image shape"
+    U = np.random.permutation(np.arange(0, img.shape[0], blockshape[0]))
+    V = np.random.permutation(np.arange(0, img.shape[1], blockshape[1]))
     img_permuted = np.copy(img)
-    for c in range(img.shape[2]):
-        img_channel = img[:,:,c]
-        img_permuted[:,:,c] = img_channel.ravel()[np.argsort(mask.ravel())].reshape( img_channel.shape )
+    for (i,i_perm) in zip(np.arange(0, img.shape[0], blockshape[0]), U):
+        for (j,j_perm) in zip(np.arange(0, img.shape[1], blockshape[1]), V):
+            img_permuted[i_perm:i_perm+blockshape[0], j_perm:j_perm+blockshape[1]] = img[i:i+blockshape[0], j:j+blockshape[1]]
     return img_permuted
 
+
+def hierarchical_block_permute(img, num_blocks, permute_at_level, min_blockshape=8):
+    """Generate a top-down, hierarchical block permutation
+    
+       input:
+         -img:  The HxWxC image to permute
+         -num_blocks:  A tuple (N,M) such that each level is decomposed into NxM=(rows,cols) blocks, this must be equally divisible with image size at all levels of hierarchy
+         -permute_at_level: array of length log2(min(img.shape))) with entries permute_at_level[k]=[true|false] if the image at level k is permuted.  k=0 is the full size image
+
+    """
+
+    assert img.shape[0] % num_blocks[0] == 0 and img.shape[1] % num_blocks[1] == 0, "Recursive image size %s and block layout %s must be divisible" % (str(img.shape[0:2]), str(num_blocks))
+    imgsize = (img.shape[0], img.shape[1])
+    blockshape = (img.shape[0] // num_blocks[0], img.shape[1] // num_blocks[1])
+    levels = int(np.log2(min(imgsize)))
+    img_permuted = np.copy(img)
+    if 0 in permute_at_level:
+        img_permuted = block_permute(img_permuted, blockshape)        
+    for i in range(0, img.shape[0], blockshape[0]):
+        for j in range(0, img.shape[1], blockshape[1]):
+            subimg = img_permuted[i:i+blockshape[0], j:j+blockshape[1]]
+            if min(blockshape) > min_blockshape:
+                subimg_permuted = hierarchical_block_permute(subimg, num_blocks, permute_at_level=np.array(permute_at_level)-1)
+                img_permuted[i:i+blockshape[0], j:j+blockshape[1]] = subimg_permuted
+            elif max(permute_at_level) > 0:
+                raise ValueError('Recusrive blockshape=%s <= minimum blockshape=%d' % (subimg.shape[0:2], min_blockshape)) 
+    return img_permuted
+
+
+def hierarchical_block_permutation_matrix(imgshape, blocks, permute_at_level, min_blockshape=8):
+    """Given an image with shape=(HxWxC) return the permutation matrix P such that P.dot(img.flatten()).reshape(imgshape) == hierarchical_block_permute(img, ...)"""
+    img = np.array(range(0, np.prod(imgshape))).reshape(imgshape)
+    img_permute = hierarchical_block_permute(img, blocks, permute_at_level, min_blockshape)
+    cols = img_permute.flatten()    
+    rows = range(0, len(cols))
+    vals = np.ones_like(rows)
+    return scipy.sparse.coo_matrix( (vals, (rows, cols)), shape=(np.prod(img.shape), np.prod(img.shape)), dtype=np.float32)
 
