@@ -28,6 +28,7 @@ class KeyedModel(object):
         # Assign layerkeys using provided lambda function
         net.eval()
         netshape = keynet.torch.netshape(net, inshape)
+        print(netshape)
         (i,o) = (netshape['input'], netshape['output'])              
         layerkey = {k:{'outkeypair':f_layername_to_keypair(k, v['outshape']),
                        'prevlayer':v['prevlayer']}
@@ -218,6 +219,7 @@ class KeyPair(object):
         assert alpha is not None and beta is not None, "Invalid (alpha, beta)"
         return lambda layername, outshape: (tuple(self._SparseMatrix(m) for m in sparse_generalized_stochastic_matrix_with_inverse(np.prod(outshape)+1, alpha, beta)) if 'relu' not in layername else 
                                             tuple(self._SparseMatrix(m) for m in sparse_generalized_permutation_matrix_with_inverse(np.prod(outshape)+1, beta)))
+    
     def diagonal_tiled_identity_matrix(self, tilesize):
         assert tilesize is not None, "invalid tilesize"
         return lambda layername, outshape: sparse_diagonal_tiled_identity_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix)
@@ -246,9 +248,15 @@ class KeyPair(object):
         
         return (_f_keypair, _f_reorder)
 
+    def diagonal_tiled_identity_matrix_in_block_order(self, tilesize):
+        assert tilesize is not None, "invalid tilesize"
+        f_channel_to_block = lambda outshape, A: A.matmul(self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True)))
+        f_block_to_channel = lambda outshape, A: A.transpose().matmul(self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True)).transpose())
+        return lambda layername, outshape: tuple(f(outshape, A) for (f,A) in zip([f_channel_to_block, f_block_to_channel], sparse_diagonal_tiled_identity_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix)))
+    
     
 def keygen(format, backend, alpha=None, beta=0, tilesize=None, n_processes=1):
-    formats = set(['identity', 'permutation', 'stochastic', 'tiled-identity', 'tiled-permutation', 'tiled-stochastic', 'tiled-blockpermutation'])
+    formats = set(['identity', 'permutation', 'stochastic', 'tiled-identity', 'tiled-identity-blockorder', 'tiled-permutation', 'tiled-stochastic', 'tiled-blockpermutation'])
     backends = set(['torch', 'scipy'])
     assert format in formats, "Invalid format '%s' - must be in '%s'" % (format, str(formats))
     assert backend in backends, "Invalid backend '%s' - must be in '%s'" % (backend, str(backends))
@@ -262,6 +270,8 @@ def keygen(format, backend, alpha=None, beta=0, tilesize=None, n_processes=1):
         return keypair.stochastic(alpha, beta)
     elif format == 'tiled-identity':
         return keypair.diagonal_tiled_identity_matrix(tilesize)
+    elif format == 'tiled-identity-blockorder':
+        return keypair.diagonal_tiled_identity_matrix_in_block_order(tilesize)
     elif format == 'tiled-permutation':
         return keypair.block_diagonal_tiled_permutation_matrix(tilesize)            
     elif format == 'tiled-stochastic':
@@ -279,8 +289,8 @@ def Keynet(inshape, net, format, backend, do_output_encryption=False, verbose=Tr
     return (sensor, model)
 
 
-def IdentityKeynet(inshape, net):
-    return Keynet(inshape, net, 'identity', 'scipy')
+def IdentityKeynet(inshape, net, verbose=True):
+    return Keynet(inshape, net, 'identity', 'scipy', verbose=verbose)
 
 
 def PermutationKeynet(inshape, net, do_output_encryption=False):
@@ -291,9 +301,12 @@ def StochasticKeynet(inshape, net, alpha, beta=0, do_output_encryption=False):
     return Keynet(inshape, net, 'stochastic', 'scipy', do_output_encryption, alpha=alpha, beta=beta)    
 
 
-def TiledIdentityKeynet(inshape, net, tilesize, n_processes=1):
-    return Keynet(inshape, net, 'tiled-identity', 'scipy', do_output_encryption=False, tilesize=tilesize, n_processes=n_processes)
-
+def TiledIdentityKeynet(inshape, net, tilesize, n_processes=1, verbose=True, order='channel'):
+    if order == 'channel':
+        return Keynet(inshape, net, 'tiled-identity', 'scipy', do_output_encryption=False, tilesize=tilesize, n_processes=n_processes, verbose=verbose)
+    else:
+        return Keynet(inshape, net, 'tiled-identity-blockorder', 'scipy', do_output_encryption=False, tilesize=tilesize, n_processes=n_processes, verbose=verbose)
+    
 
 def TiledPermutationKeynet(inshape, net, tilesize, do_output_encryption=False, n_processes=1):
     return Keynet(inshape, net, 'tiled-permutation', 'scipy', do_output_encryption, tilesize=tilesize, n_processes=n_processes)

@@ -345,7 +345,7 @@ def test_keynet_constructor():
     print('[test_keynet_constructor]:  IdentityKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))
     print('[test_keynet_constructor]:  IdentityKeynet (allconvnet) PASSED')
 
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 2048, n_processes=8)    
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 32*32, n_processes=8)    
     yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
     assert np.allclose(yh, y, atol=1E-5)
@@ -446,13 +446,22 @@ def test_sparse_matrix():
 
     print('[test_sparse_matrix]: PASSED')
 
+
+def test_memory_order():
+    inshape = (3,32,32)
+    net = keynet.cifar10.AllConvNet()    
+    net.load_state_dict(torch.load('./models/cifar10_allconv.pth', map_location=torch.device('cpu')));
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 2, n_processes=8, order='block')    
+    vipy.util.save((sensor, knet), 'keynet_allconv_tiled_blockorder.pkl')    
+    
     
 if __name__ == '__main__':
-    test_torch_homogenize()
-    test_sparse_toeplitz_conv2d()
-    test_sparse_toeplitz_avgpool2d()
-    test_blockview()
-    test_sparse_matrix()
-    test_sparse_tiled_matrix()        
-    test_keynet_constructor()
-    test_keynet_mnist()    
+    #test_torch_homogenize()
+    #test_sparse_toeplitz_conv2d()
+    #test_sparse_toeplitz_avgpool2d()
+    #test_blockview()
+    #test_sparse_matrix()
+    #test_sparse_tiled_matrix()        
+    #test_keynet_constructor()
+    #test_keynet_mnist()
+    test_memory_order()

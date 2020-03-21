@@ -38,8 +38,8 @@ class KeyedLayer(nn.Module):
         assert self.W is not None, "Layer not keyed"
         return self.W.nnz()
 
-    def toimage(self, mindim=256, showdim=1024):
-        return keynet.sparse.spy(self.W, mindim, showdim)
+    def toimage(self, mindim=256, showdim=1024, range=None):
+        return keynet.sparse.spy(self.W, mindim, showdim, range=range)
 
     
 class KeyedConv2d(KeyedLayer):

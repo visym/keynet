@@ -331,6 +331,7 @@ def print_parameters():
     inshape = (1,28,28)
     net = keynet.mnist.LeNet_AvgPool()
     net.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'));
+    print('[figures.print_parameters]:  lenet parameters=%d' % (keynet.torch.count_parameters(net)))
     
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)
     print('[figures.print_parameters]:  IdentityKeynet (lenet) parameters=%d' % (knet.num_parameters()))        
@@ -341,10 +342,23 @@ def print_parameters():
     inshape = (3,32,32)
     net = keynet.cifar10.AllConvNet()    
     net.load_state_dict(torch.load('./models/cifar10_allconv.pth', map_location=torch.device('cpu')));
+    print('[figures.print_parameters]:  allconvnet parameters=%d' % (keynet.torch.count_parameters(net)))
     
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)    
     print('[figures.print_parameters]:  IdentityKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))
 
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 2048, n_processes=8)    
-    print('[figures.print_parameters]:  TiledIdentityKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))    
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 8, n_processes=8)    
+    print('[figures.print_parameters]:  TiledIdentityKeynet-8 (allconvnet) parameters=%d' % (knet.num_parameters()))    
+    
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 32, n_processes=8)    
+    print('[figures.print_parameters]:  TiledIdentityKeynet-32 (allconvnet) parameters=%d' % (knet.num_parameters()))    
 
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 256, n_processes=8)    
+    print('[figures.print_parameters]:  TiledIdentityKeynet-256 (allconvnet) parameters=%d' % (knet.num_parameters()))    
+
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 1024, n_processes=8)    
+    print('[figures.print_parameters]:  TiledIdentityKeynet-1024 (allconvnet) parameters=%d' % (knet.num_parameters()))    
+    
+
+if __name__ == '__main__':
+    print_parameters()

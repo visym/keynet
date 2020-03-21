@@ -100,7 +100,9 @@ def sparse_toeplitz_avgpool2d(inshape, filtershape, stride):
 
 
 def sparse_channelorder_to_blockorder(shape, blockshape, homogenize=False):
-    (C,H,W) = shape
+    assert blockshape <= np.prod(shape), "Invalid blockshape"
+    assert np.prod(shape) % blockshape == 0, "Invalid blockshape"
+    (C,H,W) = shape if shape[1] != 1 and shape[2] != 1 else (1,shape[0],1)  # flatten for fc
     img_channelorder = np.array(range(0, H*W)).reshape(H,W)  # HxW, img[0:H] == first row 
     img_blockorder = blockview(img_channelorder, blockshape).flatten()  # (H//B)x(W//B)xBxB, img[0:B*B] == first block
     (rows, cols, vals) = ([], [], [])
@@ -640,8 +642,13 @@ def sparse_block_permutation_tiled_identity_matrix_with_inverse(squareshape, til
             tiler(shape=(squareshape, squareshape), coo_matrix=P.tocoo(), tilesize=tilesize).transpose())
 
 
-def spy(A, mindim=256, showdim=1024):
+def spy(A, mindim=256, showdim=1024, range=None):
     """Visualize sparse matrix A"""
+
+    if range is not None:
+        B = A.tocoo().tocsr()[range[0]:range[1]].transpose()[range[0]:range[1]].transpose().tocoo()
+        return spy(B, mindim, showdim, range=None)
+    
     scale = float(mindim) / min(A.shape)
     (H, W) = np.ceil(np.array(A.shape)*scale)
     

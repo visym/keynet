@@ -43,8 +43,10 @@ def netshape(net, inshape):
         if 'output' in d_modulename_to_shape:
             del d_modulename_to_shape['output']         # delete and            
         prevlayer = [k for k in d_modulename_to_shape][-1]
-        d_modulename_to_shape[m.__name] = {'inshape':tuple(list(input[0].shape)[1:]),
-                                           'outshape':tuple(list(output.shape)[1:]),
+        inshape = (input[0].shape[1], input[0].shape[2], input[0].shape[3]) if len(input[0].shape) == 4 else (input[0].shape[1], 1, 1)  # canonicalize to (C,H,W)
+        outshape = (output.shape[1], output.shape[2], output.shape[3]) if len(output.shape) == 4 else (output.shape[1], 1, 1)  # canonicalize to (C,H,W)       
+        d_modulename_to_shape[m.__name] = {'inshape':inshape,
+                                           'outshape':outshape,
                                            'prevlayer':prevlayer}
         d_modulename_to_shape['output'] = m.__name  # reinsert for last        
         delattr(m, '__name')
@@ -54,8 +56,6 @@ def netshape(net, inshape):
     [h.remove() for h in hooks]
     return d_modulename_to_shape
 
-
-    
 
 def homogenize(x):
     """Convert NxCxHxW tensor to Nx(C*H*W+1) tensor where last column is one"""
