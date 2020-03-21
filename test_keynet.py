@@ -302,7 +302,8 @@ def test_keynet_constructor():
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet_constructor]:  IdentityKeynet (scipy) PASSED')
-
+    vipy.util.save((sensor, knet), 'keynet_lenet_identity.pkl')
+    
     (sensor, knet) = keynet.system.Keynet(inshape, net, 'identity', 'torch')
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet_constructor]:  IdentityKeynet (torch) PASSED')
@@ -313,6 +314,7 @@ def test_keynet_constructor():
 
     (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=1, do_output_encryption=False)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    vipy.util.save((sensor, knet), 'keynet_lenet_stochastic.pkl')        
     print('[test_keynet_constructor]:  StochasticKeynet (alpha=1) PASSED')    
 
     (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=2, do_output_encryption=False)
@@ -338,13 +340,17 @@ def test_keynet_constructor():
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)    
     yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
-    assert np.allclose(yh, y, atol=1E-5)    
+    assert np.allclose(yh, y, atol=1E-5)
+    vipy.util.save((sensor, knet), 'keynet_allconv.pkl')
+    print('[test_keynet_constructor]:  IdentityKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))
     print('[test_keynet_constructor]:  IdentityKeynet (allconvnet) PASSED')
 
     (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 2048, n_processes=8)    
     yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
-    assert np.allclose(yh, y, atol=1E-5)    
+    assert np.allclose(yh, y, atol=1E-5)
+    vipy.util.save((sensor, knet), 'keynet_allconv_tiled.pkl')
+    print('[test_keynet_constructor]:  TiledIdentityKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))    
     print('[test_keynet_constructor]:  TiledIdentityKeynet (allconvnet) PASSED')
 
     print('[test_keynet_constructor]:  PASSED')    
@@ -384,14 +390,14 @@ def test_keynet_mnist():
 
     # IdentityTiled keynet
     inshape = (1,28,28)
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, tilesize=32)    
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, tilesize=32, n_processes=8)    
     yh_identity = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
     assert(np.allclose(np.array(y[0]), yh_identity))
     print('[test_keynet_mnist]:  TiledIdentityKeynet: passed')
     print('[test_keynet_mnist]:  TiledIdentityKey parameters: %d' % knet.num_parameters())
     
     # Permutation KeyLeNet
-    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, tilesize=32)    
+    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, tilesize=32, n_processes=8)    
     yh = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
     assert(np.allclose(np.array(y[0]), yh))
     print('[test_keynet_mnist]:  TiledPermutationKeynet: passed')
@@ -405,7 +411,7 @@ def test_keynet_mnist():
     print('[test_keynet_mnist]:  StochasticKeynet parameters: %d' % knet.num_parameters())
 
     # Stochastic Tiled
-    (sensor, knet) = keynet.system.StochasticTiledKeynet(inshape, net, alpha=2, beta=2, tilesize=32)    
+    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, alpha=2, beta=2, tilesize=32, n_processes=8)    
     yh = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
     assert(np.allclose(np.array(y[0]), yh))
     print('[test_keynet_mnist]:  TiledStochasticKeynet: passed')
@@ -413,48 +419,6 @@ def test_keynet_mnist():
     return 
 
     
-def test_keynet_cifar10():
-    raise ValueError('FIXME')
-
-    from keynet.cifar10 import AllConvNet, StochasticKeyNet
-
-    torch.set_grad_enabled(False)
-    np.random.seed(0)
-    X = [torch.tensor(np.random.rand(1,3,32,32).astype(np.float32)) for j in range(0,16)]
-
-    # AllConvNet
-    net = AllConvNet()
-    net.eval()
-    net.load_state_dict(torch.load('./models/cifar10_allconv.pth'))
-
-    with Stopwatch() as sw:
-        y = [net(x) for x in X]
-    with Stopwatch() as sw:
-        y = [net(x) for x in X]
-    print('AllConvNet Elapsed: %f sec' % (sw.elapsed/len(X)))
-
-    # StochasticKeyNet
-    for alpha in [1,2,4]:
-        A0 = sparse_permutation_matrix(3*32*32 + 1)
-        A0inv = A0.transpose()
-        knet = StochasticKeyNet(alpha=alpha, use_cupy_sparse=False, use_torch_sparse=False)
-        knet.eval()    
-        knet.load_state_dict_keyed(torch.load('./models/cifar10_allconv.pth'), A0inv=A0inv)
-        Xh = [knet.encrypt(A0, x) for x in X]
-        with Stopwatch() as sw:
-            yh = [knet.decrypt(knet(xh)) for xh in Xh]
-        with Stopwatch() as sw:
-            yh = [knet.decrypt(knet(xh)) for xh in Xh]
-        print('Keyed-AllConvNet (alpha=%d) Elapsed: %f sec' % (alpha, sw.elapsed/len(Xh)))
-
-        print(y[0], yh[0])
-        assert (np.allclose(np.array(y[0]).flatten(), np.array(yh[0]).flatten(), atol=1E-1))
-        print('CIFAR-10 StochasticKeyNet (alpha=%d): passed' % alpha)
-        
-        print('AllConvNet parameters: %d' % keynet.torch.count_parameters(net))
-        print('StochasticKeyNet (alpha=%d) parameters: %d' % (alpha, keynet.torch.count_keynet_parameters(knet)))
-    
-
 def test_sparse_matrix():
 
     W_numpy = np.random.rand(3,3).astype(np.float32)
@@ -487,9 +451,8 @@ if __name__ == '__main__':
     test_torch_homogenize()
     test_sparse_toeplitz_conv2d()
     test_sparse_toeplitz_avgpool2d()
-    #test_keynet_cifar10()
     test_blockview()
     test_sparse_matrix()
     test_sparse_tiled_matrix()        
     test_keynet_constructor()
-    #test_keynet_mnist()    
+    test_keynet_mnist()    

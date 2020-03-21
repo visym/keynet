@@ -57,8 +57,8 @@ class KeyedConv2d(KeyedLayer):
         assert len(inshape) == 3, "Inshape must be (C,H,W) for the shape of the tensor at the input to this layer"""
 
     def extra_repr(self):
-        str_shape = ', backend=%s, shape=%s>' % (str(type(self.W)), str(self.W.shape)) if self.W is not None else '>'
-        return str('<KeyedConv2d: in_channels=%d, out_channels=%d, kernel_size=%s, stride=%s%s' (self.in_channels, self.out_channels, str(self.kernel_size), str(self.stride), str_shape))
+        str_shape = ', backend=%s, shape=%s, nnz=%d>' % (str(type(self.W)), str(self.W.shape), self.nnz()) if self.W is not None else '>'
+        return str('<KeyedConv2d: in_channels=%d, out_channels=%d, kernel_size=%s, stride=%s%s' % (self.in_channels, self.out_channels, str(self.kernel_size), str(self.stride), str_shape))
         
     def key(self, w, b, A, Ainv):
         """Assign key to conv2d
@@ -89,8 +89,8 @@ class KeyedLinear(KeyedLayer):
         self.out_features = out_features
 
     def extra_repr(self):
-        str_shape = ', backend=%s, shape=%s>' % (str(type(self.W)), str(self.W.shape)) if self.W is not None else '>'        
-        return str('<KeyedLinear: in_features=%d, out_features=%d%s>' (self.in_features, self.out_features, str_shape))
+        str_shape = ', backend=%s, shape=%s, nnz=%d>' % (str(type(self.W)), str(self.W.shape), self.nnz()) if self.W is not None else '>'        
+        return str('<KeyedLinear: in_features=%d, out_features=%d%s>' % (self.in_features, self.out_features, str_shape))
         
     def key(self, w, b, A, Ainv):
         W = Ainv.from_torch_dense(homogenize_matrix(w, b).t())  # transposed for right multiply
@@ -102,8 +102,8 @@ class KeyedReLU(KeyedLayer):
         super(KeyedReLU, self).__init__()
 
     def extra_repr(self):
-        str_shape = ': backend=%s, shape=%s>' % (str(type(self.W)), str(self.W.shape)) if self.W is not None else '>'        
-        return str('<KeyedReLU%s' % (str(self.backend), str_shape))
+        str_shape = ': backend=%s, shape=%s, nnz=%d>' % (str(type(self.W)), str(self.W.shape), self.nnz()) if self.W is not None else '>'        
+        return str('<KeyedReLU%s' % (str_shape))
         
     def key(self, P, Ainv):
         return super(KeyedReLU, self).key(None, P, Ainv)
@@ -120,8 +120,8 @@ class KeyedAvgpool2d(KeyedLayer):
         self.inshape = inshape
 
     def extra_repr(self):
-        str_shape = ', backend=%s, shape=%s>' % (str(type(self.W)), str(self.W.shape)) if self.W is not None else '>'        
-        return str('<KeyedAvgpool2d: kernel_size=%s, stride=%s%s>' (str(self.kernel_size), str(self.stride), str_shape))
+        str_shape = ', backend=%s, shape=%s, nnz=%d>' % (str(type(self.W)), str(self.W.shape), self.nnz()) if self.W is not None else '>'        
+        return str('<KeyedAvgpool2d: kernel_size=%s, stride=%s%s>' % (str(self.kernel_size), str(self.stride), str_shape))
     
     def key(self, A, Ainv):
         W = Ainv.from_scipy_sparse(sparse_toeplitz_avgpool2d(self.inshape, (self.inshape[0], self.inshape[0], self.kernel_size, self.kernel_size), self.stride))  # Expensive

@@ -92,12 +92,13 @@ class KeyedModel(object):
         self._keynet = nn.Sequential(d_name_to_keyedmodule)
         self._embeddingkey = layerkey['output']
         self._imagekey = layerkey['input']
-
-    def __getattr__(self, layername):
-        if hasattr(self._keynet, layername):
-            return self._keynet.__getattr__(layername)
-        else:
-            raise ValueError('Invalid layer name "%s"' % layername)
+        self._layernames = layernames
+        
+    def __getattr__(self, attr):
+        try:
+            return self._keynet.__getattr__(attr)
+        except:
+            return self.__getattribute__(attr)
     
     def forward(self, img_cipher, outkey=None):
         outkey = outkey if outkey is not None else self.embeddingkey()
@@ -124,6 +125,8 @@ class KeyedModel(object):
     def num_parameters(self):
         return sum([c.nnz() for (k,c) in self._keynet.named_children() if hasattr(c, 'nnz')])
 
+    def layers(self):
+        return self._layernames
 
 class KeyedSensor(keynet.layer.KeyedLayer):
     def __init__(self, inshape, keypair, reorder=None):

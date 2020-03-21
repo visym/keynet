@@ -13,8 +13,8 @@ from vipy.util import Stopwatch, tempdir
 from keynet.sparse import sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse
 from keynet.sparse import sparse_generalized_stochastic_block_matrix_with_inverse, sparse_identity_matrix
 from keynet.torch import homogenize, dehomogenize
-from keynet.torch import sparse_toeplitz_conv2d
-from keynet.torch import sparse_toeplitz_avgpool2d
+from keynet.sparse import sparse_toeplitz_conv2d
+from keynet.sparse import sparse_toeplitz_avgpool2d
 from keynet.util import torch_avgpool2d_in_scipy, torch_conv2d_in_scipy
 import keynet.util
 import keynet.blockpermute
@@ -22,9 +22,10 @@ import keynet.mnist
 import keynet.cifar10
 import keynet.torch
 import keynet.fiberbundle
-import keynet.block
 from keynet.mnist import LeNet, LeNet_AvgPool
 from keynet.cifar10 import AllConvNet
+import keynet.system
+import keynet.dense
 
 
 def example_2x2():
@@ -33,13 +34,13 @@ def example_2x2():
 
     img = np.array([[11,12],[21,22]]).astype(np.float32)
     x = img.flatten().reshape(4,1)
-    D1 = keynet.util.uniform_random_diagonal_matrix(4)
-    P1 = keynet.util.random_doubly_stochastic_matrix(4,2)
+    D1 = keynet.dense.uniform_random_diagonal_matrix(4)
+    P1 = keynet.dense.random_doubly_stochastic_matrix(4,2)
     A1 = np.dot(D1,P1)
     A1inv = np.linalg.inv(A1)
 
-    P2 = keynet.util.random_permutation_matrix(4)
-    D2 = keynet.util.uniform_random_diagonal_matrix(4)
+    P2 = keynet.dense.random_permutation_matrix(4)
+    D2 = keynet.dense.uniform_random_diagonal_matrix(4)
     A2 = np.dot(D2,P2)
     A2inv = np.linalg.inv(A2)
 
@@ -93,22 +94,22 @@ def optical_transformation_montage(imgfile=None):
     """Reproduce figure in paper"""
 
     (m,n) = (256,256)
-    img = vipy.image.Image(imgfile if imgfile is not None else 'owl.jpg').resize(256,256).numpy()
+    img = vipy.image.Image(imgfile if imgfile is not None else 'owl.jpg').resize(256,256).rgb().numpy()
 
     D = [np.maximum(1E-6, 1.0 + (s*np.random.rand( m,n,3 )-(s/2.0))) for s in [0.1, 1.0, 10000.0]]
     B = [255*np.maximum(1E-6, s*np.random.rand( m,n,3 )) for s in [0.1, 1.0, 10000.0]]
-    P = [keynet.blockpermute.identity_permutation_mask(256),
-         keynet.blockpermute.local_permutation_mask(256, 2, minscale=2, identityscale=3), 
-         keynet.blockpermute.local_permutation_mask(256, 2, minscale=3, identityscale=4), 
-         keynet.blockpermute.local_permutation_mask(256, 2, minscale=4, identityscale=5), 
-         keynet.blockpermute.local_permutation_mask(256, 2, minscale=4, identityscale=6), 
-         keynet.blockpermute.local_permutation_mask(256, 2, minscale=4, identityscale=7), 
-         keynet.blockpermute.local_permutation_mask(256, 2, minscale=4, identityscale=8)]
-         
+    P = [img,  # no permutation
+         keynet.blockpermute.hierarchical_block_permute(img, (2,2), permute_at_level=range(6,8), min_blockshape=1),
+         keynet.blockpermute.hierarchical_block_permute(img, (2,2), permute_at_level=range(5,6), min_blockshape=1),
+         keynet.blockpermute.hierarchical_block_permute(img, (2,2), permute_at_level=range(4,5), min_blockshape=1),
+         keynet.blockpermute.hierarchical_block_permute(img, (2,2), permute_at_level=range(3,5), min_blockshape=1),
+         keynet.blockpermute.hierarchical_block_permute(img, (2,2), permute_at_level=range(2,6), min_blockshape=1),
+         keynet.blockpermute.hierarchical_block_permute(img, (2,2), permute_at_level=range(0,8), min_blockshape=1)]
+    
     imlist = []
     for (d,b) in zip(D,B):
         for p in P:
-            img_permuted = keynet.blockpermute.block_permute(img, p)
+            img_permuted = p
             img_scaled = np.multiply(d, img_permuted) + b
             img_scaled = np.uint8(255*((img_scaled-np.min(img_scaled))/ (np.max(img_scaled)-np.min(img_scaled))))
             imlist.append(vipy.image.Image(array=img_scaled, colorspace='rgb'))
@@ -325,4 +326,25 @@ def train_cifar10_allconv_fiberbundle(do_mean_estimation=True, cifardir='/proj/e
     net3.load_state_dict(torch.load('./models/cifar10_allconv_fiberbundle.pth'))
     keynet.cifar10.validate(net3, testloader=testpreload)
 
+
+def print_parameters():
+    inshape = (1,28,28)
+    net = keynet.mnist.LeNet_AvgPool()
+    net.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'));
+    
+    (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)
+    print('[figures.print_parameters]:  IdentityKeynet (lenet) parameters=%d' % (knet.num_parameters()))        
+
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 28, n_processes=2)
+    print('[figures.print_parameters]:  TiledIdentityKeynet (lenet) parameters=%d' % (knet.num_parameters()))        
+
+    inshape = (3,32,32)
+    net = keynet.cifar10.AllConvNet()    
+    net.load_state_dict(torch.load('./models/cifar10_allconv.pth', map_location=torch.device('cpu')));
+    
+    (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)    
+    print('[figures.print_parameters]:  IdentityKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))
+
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 2048, n_processes=8)    
+    print('[figures.print_parameters]:  TiledIdentityKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))    
 

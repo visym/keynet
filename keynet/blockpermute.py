@@ -35,7 +35,7 @@ def hierarchical_block_permute(img, num_blocks, permute_at_level, min_blockshape
         for j in range(0, img.shape[1], blockshape[1]):
             subimg = img_permuted[i:i+blockshape[0], j:j+blockshape[1]]
             if min(blockshape) > min_blockshape:
-                subimg_permuted = hierarchical_block_permute(subimg, num_blocks, permute_at_level=np.array(permute_at_level)-1, seed=seed)
+                subimg_permuted = hierarchical_block_permute(subimg, num_blocks, permute_at_level=np.array(permute_at_level)-1, seed=seed, min_blockshape=min_blockshape)
                 img_permuted[i:i+blockshape[0], j:j+blockshape[1]] = subimg_permuted
             elif max(permute_at_level) > 0:
                 raise ValueError('Recusrive blockshape=%s <= minimum blockshape=%d' % (subimg.shape[0:2], min_blockshape)) 
