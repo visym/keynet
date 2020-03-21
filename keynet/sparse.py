@@ -643,9 +643,10 @@ def sparse_block_permutation_tiled_identity_matrix_with_inverse(squareshape, til
 
 
 def spy(A, mindim=256, showdim=1024, range=None):
-    """Visualize sparse matrix A"""
+    """Visualize sparse matrix A by resizing the block A[range[0]:range[1], range[0]:range[1]] to (mindim, mindim) then upsapling to (showdim,showdim) and return a vipy.image.Image()"""
 
     if range is not None:
+        assert isinstance(range, tuple) and len(range) == 2, "Range must be tuple (start_dim, end_dim)"
         B = A.tocoo().tocsr()[range[0]:range[1]].transpose()[range[0]:range[1]].transpose().tocoo()
         return spy(B, mindim, showdim, range=None)
     
