@@ -100,11 +100,16 @@ def sparse_toeplitz_avgpool2d(inshape, filtershape, stride):
 
 
 def sparse_channelorder_to_blockorder(shape, blockshape, homogenize=False):
-    assert blockshape <= np.prod(shape), "Invalid blockshape"
-    assert np.prod(shape) % blockshape == 0, "Invalid blockshape"
-    (C,H,W) = shape if shape[1] != 1 and shape[2] != 1 else (1,shape[0],1)  # flatten for fc
-    img_channelorder = np.array(range(0, H*W)).reshape(H,W)  # HxW, img[0:H] == first row 
+    assert isinstance(shape, tuple) and len(shape)==3, "Shape must be (C,H,W) tuple"
+    
+    (C,H,W) = shape
+    if (H*W) % blockshape != 0:
+        warnings.warn('[keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blockshape=%d and shape=%d' % (blockshape, str(shape)))
+
+    (H_pad, W_pad) = (int(blockshape*np.ceil((H)/float(blockshape))), int(blockshape*np.ceil((W)/float(blockshape))))    
+    img_channelorder = np.array(range(0, H_pad*W_pad)).reshape(H_pad,W_pad)  # HxW, img[0:H] == first row 
     img_blockorder = blockview(img_channelorder, blockshape).flatten()  # (H//B)x(W//B)xBxB, img[0:B*B] == first block
+    img_blockorder = img_blockorder[0:H*W]
     (rows, cols, vals) = ([], [], [])
     for c in range(0,C):
         rows.extend(np.array(range(0, H*W)) + c*H*W)

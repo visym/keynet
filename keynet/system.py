@@ -238,14 +238,13 @@ class KeyPair(object):
         assert tilesize is not None, "invalid tilesize"
         
         def _f_reorder(outshape):
-            B_channel_to_block = self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True))
-            return B_channel_to_block
+            return self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True))
         
         def _f_keypair(layername, outshape):
             (A, Ainv) = sparse_block_permutation_tiled_identity_matrix_with_inverse(np.prod(outshape)+1, tilesize*tilesize, tiler=self._SparseTiledMatrix)
-            B_channel_to_block = _f_reorder(outshape)            
+            B_channel_to_block = _f_reorder(outshape)                
             return (A.matmul(B_channel_to_block), Ainv.transpose().matmul(B_channel_to_block).transpose())
-        
+                
         return (_f_keypair, _f_reorder)
 
     def diagonal_tiled_identity_matrix_in_block_order(self, tilesize):
