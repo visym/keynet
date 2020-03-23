@@ -451,7 +451,7 @@ def test_memory_order():
     inshape = (3,32,32)
     net = keynet.cifar10.AllConvNet()    
     net.load_state_dict(torch.load('./models/cifar10_allconv.pth', map_location=torch.device('cpu')));
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 2, n_processes=8, order='block')    
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 4, n_processes=8, order='block')    
     return vipy.util.save((sensor, knet), 'keynet_allconv_tiled_blockorder.pkl')    
 
     

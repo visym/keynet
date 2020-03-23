@@ -21,6 +21,7 @@ from keynet.dense import random_positive_definite_matrix, random_doubly_stochast
 from keynet.util import blockview
 from joblib import Parallel, delayed
 import vipy
+import warnings
 
 
 def _parallel_sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1, n_processes=1):
@@ -104,7 +105,7 @@ def sparse_channelorder_to_blockorder(shape, blockshape, homogenize=False):
     
     (C,H,W) = shape
     if (H*W) % blockshape != 0:
-        warnings.warn('[keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blockshape=%d and shape=%d' % (blockshape, str(shape)))
+        warnings.warn('[keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blockshape=%d and shape=%s' % (blockshape, str(shape)))
 
     (H_pad, W_pad) = (int(blockshape*np.ceil((H)/float(blockshape))), int(blockshape*np.ceil((W)/float(blockshape))))    
     img_channelorder = np.array(range(0, H_pad*W_pad)).reshape(H_pad,W_pad)  # HxW, img[0:H] == first row 
