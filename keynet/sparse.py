@@ -324,6 +324,18 @@ class SparseMatrix(object):
     def __getitem__(self, k):
         if not (isinstance(k, slice) or isinstance(k, tuple)):
             k = slice(k,k+1)  # force result to be 2D
+
+        if isinstance(k, tuple):
+            (ib, ie) = (k[0].start, k[0].stop)
+            (jb, je) = (k[1].start, k[1].stop)
+            assert k[0].step == 1 or k[0].step is None
+            assert k[1].step == 1 or k[1].step is None             
+            return SparseMatrix(self.clone()._matrix.tocsr()[ib:ie].transpose()[jb:je].transpose().tocoo())
+        else:
+            (ib, ie) = (k.start, k.stop)            
+            assert k.step == 1 or k.step is None 
+            return SparseMatrix(self.clone()._matrix.tocsr()[ib:ie].tocoo())
+            
         return SparseMatrix(self._matrix.__getitem__(k))  # no copy
 
     def __add__(self, other):
@@ -353,6 +365,9 @@ class SparseMatrix(object):
     def clone(self):
         return copy.deepcopy(self)
 
+    def spy(self):
+        return spy(self._matrix)
+    
     # Must be overloaded
     def from_torch_dense(self, A):
         assert self.is_torch_dense(A)                
@@ -427,6 +442,28 @@ class SparseTiledMatrix(SparseMatrix):
     def parallel(self, n_processes):
         self._n_processes = n_processes
         return self
+
+    def __getitem__(self, k):
+        if not (isinstance(k, slice) or isinstance(k, tuple)):
+            k = slice(k,k+1)  # force result to be 2D
+
+        m = self.clone()        
+        (H,W) = m.shape
+        if isinstance(k, tuple):
+            (ib, ie) = (k[0].start // m.tilesize(), k[0].stop // m.tilesize())
+            (jb, je) = (k[1].start // m.tilesize(), k[1].stop // m.tilesize())
+            m.shape = (k[0].stop - k[0].start, k[1].stop - k[1].start)
+            assert k[0].step == 1 or k[0].step is None
+            assert k[1].step == 1 or k[1].step is None             
+        else:
+            (ib, jb) = (k.start // m.tilesize(), 0)
+            (ie, je) = (k.stop // m.tilesize(), W // m.tilesize())
+            assert k.step == 1 or k.step is None
+            m.shape = (k.stop - k.start, W)
+            
+        m._blocklist = [(i,j,k) for (i,j,k) in m._blocklist if i>=ib and i<=ie and j>=jb and j<=je]
+        m._d_blockhash_to_tile = {k:t for (k,t) in m._d_blockhash_to_tile.items() if k in set([k for (i,j,k) in m._blocklist])}
+        return m
     
     def __repr__(self):
         return str('<keynet.SparseTiledMatrix: H=%d, W=%d, tilesize=%d, tiles=%d>' % (*self.shape, self.tilesize(), len(self.tiles())))
@@ -617,7 +654,8 @@ class SparseTiledMatrix(SparseMatrix):
     def nnz(self):
         return sum([m.nnz() for m in self._d_blockhash_to_tile.values()])
 
-
+    def spy(self, mindim=256, showdim=1024):
+        return spy(self.tocoo(), mindim, showdim)
 
     
 def sparse_diagonal_tiled_identity_matrix_with_inverse(N, tilesize, tiler=SparseTiledMatrix):
@@ -660,7 +698,8 @@ def spy(A, mindim=256, showdim=1024, range=None):
 
     if range is not None:
         assert isinstance(range, tuple) and len(range) == 2, "Range must be tuple (start_dim, end_dim)"
-        B = A.tocoo().tocsr()[range[0]:range[1]].transpose()[range[0]:range[1]].transpose().tocoo()
+        (i,j) = range
+        B = A[i:j, i:j].tocoo()
         return spy(B, mindim, showdim, range=None)
     
     scale = float(mindim) / min(A.shape)
