@@ -28,7 +28,6 @@ class KeyedModel(object):
         # Assign layerkeys using provided lambda function
         net.eval()
         netshape = keynet.torch.netshape(net, inshape)
-        print(netshape)
         (i,o) = (netshape['input'], netshape['output'])              
         layerkey = {k:{'outkeypair':f_layername_to_keypair(k, v['outshape']),
                        'prevlayer':v['prevlayer']}

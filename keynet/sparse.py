@@ -552,13 +552,18 @@ class SparseTiledMatrix(SparseMatrix):
                 y[i*n:H_clip, :] += self._d_blockhash_to_tile[k].ascsr().torchdot(x[j*n:W_clip, :])
         return y
                 
-    def matmul(self, other, verbose=False):
+    def matmul(self, other, verbose=True):
         """For two Tiled() object T1, T2, compute T1.dot(T2) and save in T1"""
         assert isinstance(other, SparseTiledMatrix) or isinstance(other, SparseMatrix), "Invalid input - Must be SparseMatrix()"
         assert other.shape[0] == self.shape[1], "Non-conformal shape"        
-        if isinstance(other, SparseMatrix) and not isinstance(other, SparseTiledMatrix):
+        
+        #if isinstance(other, SparseMatrix) and not isinstance(other, SparseTiledMatrix):
+        #    # Downgrade to sparse matrix, multiply then upgrade to SparseTiledMatrix (expensive)
+        #    return self._from_coomatrix(SparseMatrix(self.tocoo()).matmul(other).tocoo(), self.tilesize())
+        
+        if True:
             # Downgrade to sparse matrix, multiply then upgrade to SparseTiledMatrix (expensive)
-            return self._from_coomatrix(SparseMatrix(self.tocoo()).matmul(other).tocoo(), self.tilesize())
+            return self._from_coomatrix(SparseMatrix(self.tocoo()).matmul(SparseMatrix(other.tocoo())).tocoo(), self.tilesize())
 
         assert other._tilesize == self._tilesize, "Non-conformal tilesize"    
         n = self.tilesize()
@@ -570,23 +575,25 @@ class SparseTiledMatrix(SparseMatrix):
         d_product = {}        
         for (i, jj, v) in self._blocklist:
             if verbose:
-                print('[keynet.SparseTiledMatrix][%d/%d]: Product...' % (i,jj))
+                print('[keynet.SparseTiledMatrix][%d/%d]: Product "%s" * "%s"...' % (i,jj,str(self), str(other)))
             for (ii, j, vo) in other._blocklist:
                 if jj == ii and v is not None and vo is not None:
                     if (v,vo) not in d_product:
                         d_product[(v,vo)] = self._d_blockhash_to_tile[v].ascsr().clone().matmul(other._d_blockhash_to_tile[vo].ascsc())   # cache
+                        d_product[(v,vo)] = d_product[(v,vo)].tocoo().todense()  # faster add?  why not just make everything dense?
                     if (i,j) not in M_accum:
                         M_accum[(i,j)] = d_product[(v,vo)]
-                        M_hash[(i,j)] = [(v,vo)]
+                        M_hash[(i,j)] = hash((v,vo))
                     else:
                         M_accum[(i,j)] += d_product[(v,vo)]
-                        M_hash[(i,j)].append( (v,vo) )
+                        M_hash[(i,j)] += hash( (v,vo) )
+
 
         (B, M) = ([], {})
         for ((i,j), m) in M_accum.items():
-            k = hash(tuple(sorted(M_hash[(i,j)], key=lambda x: x[0])))
+            k = M_hash[(i,j)]
             if k not in M:
-                M[k] = m
+                M[k] = self._block(scipy.sparse.coo_matrix(m))
             B.append( (i,j,k) )                        
         
         self._blocklist = B
