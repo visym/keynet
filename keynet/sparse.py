@@ -24,21 +24,31 @@ import vipy
 import warnings
 
 
-def _parallel_sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1, n_processes=1):
-    T = Parallel(n_jobs=n_processes)(delayed(sparse_toeplitz_conv2d)(inshape, f, bias, as_correlation, stride, n_processes=1, rowskip=i) for i in range(inshape[1]))
-    R = np.sum(T).tocsr().transpose()
-    R[-1] = T[0].tocsr().transpose()[-1]  # replace bias column
-    return R.transpose().tocoo()
-    
-                                
-def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1, rowskip=None, n_processes=1):
+def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1, homogenize=True, n_processes=1, _row=None):
     """ Returns sparse toeplitz matrix (W) in coo format that is equivalent to per-channel pytorch conv2d (spatial correlation) of filter f with a given image with shape=inshape vectorized
         conv2d(img, f) == np.dot(W, img.flatten()), right multiplied
         Example usage: test_keynet.test_sparse_toeplitz_conv2d()
     """
+    
+    if n_processes > 1 or _row is None:
+        # Parallelize construction by row
+        T = Parallel(n_jobs=n_processes)(delayed(sparse_toeplitz_conv2d)(inshape, f, bias, as_correlation, stride, n_processes=1, _row=i) for i in np.arange(0, inshape[1], stride))
+        (rows, cols, vals) = zip(*[(i,j,v) for t in T for (i,j,v) in zip(t.row, t.col, t.data)])  # merge
+        T = scipy.sparse.coo_matrix( (vals, (rows, cols)), shape=(T[0].shape))
 
-    if n_processes > 1:
-        return _parallel_sparse_toeplitz_conv2d(inshape, f, bias, as_correlation, stride, n_processes=n_processes)
+        # Sparse matrix with optional bias and affine augmentation         
+        if homogenize:
+            if bias is not None:
+                (C,U,V) = inshape                
+                UV = (U//stride)*(V//stride)
+                (row, col, val) = zip(*[(i*UV+j, 0, x) for (i,x) in enumerate(bias) for j in range(0, UV)])
+                lastcol = scipy.sparse.coo_matrix( (val, (row, col)), shape=(T.shape[0], 1))
+            else:
+                lastcol = scipy.sparse.coo_matrix((T.shape[0], 1), dtype=np.float32 )
+            lastrow = scipy.sparse.coo_matrix( ([1], ([0], [T.shape[1]])), shape=(1, T.shape[1]+1), dtype=np.float32)
+            T = scipy.sparse.vstack( (scipy.sparse.hstack( (T, lastcol)), lastrow) )
+        return T
+        
 
     # Valid shapes
     assert(len(inshape) == 3 and len(f.shape) == 4)  # 3D tensor inshape=(inchannels, height, width), f.shape=(outchannels, kernelheight, kernelwidth, inchannels)
@@ -59,7 +69,7 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1,
 
     # For every image_row
     for (ku,u) in enumerate(np.arange(0,U,stride)):
-        if rowskip is not None and u != rowskip:
+        if _row is not None and _row != u:
             continue
         # For every image_column
         for (kv,v) in enumerate(np.arange(0,V,stride)):
@@ -77,27 +87,19 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1,
                             c = c_inchannel*U*V + (u+p)*V + (v+q)
                             for (k_outchannel, c_outchannel) in enumerate(M_range if as_correlation else reversed(M_range)):
                                 data.append(f[k_outchannel,k_inchannel,i,j])
-                                #row_ind.append( np.ravel_multi_index( (c_outchannel,ku,kv), (M,U//stride,V//stride) ) )
                                 row_ind.append( c_outchannel*(U_div_stride)*(V_div_stride) + ku*(V_div_stride) + kv )
                                 col_ind.append( c )
 
-    # Sparse matrix with optional bias using affine augmentation 
-    T = scipy.sparse.coo_matrix((data, (row_ind, col_ind)), shape=(M*(U//stride)*(V//stride), C*U*V))
-    if bias is not None:
-        lastcol = scipy.sparse.coo_matrix(np.array([x*np.ones( (U//stride*V//stride), dtype=np.float32) for x in bias]).reshape( (M*(U//stride)*(V//stride),1) ))
-    else:
-        lastcol = scipy.sparse.coo_matrix(np.zeros( (T.shape[0],1), dtype=np.float32 ))
-    lastrow = np.zeros(T.shape[1]+1, dtype=np.float32);  lastrow[-1]=np.float32(1.0);  
-    return scipy.sparse.coo_matrix(scipy.sparse.vstack( (scipy.sparse.hstack( (T,lastcol)), scipy.sparse.coo_matrix(lastrow)) ))
+    return scipy.sparse.coo_matrix((data, (row_ind, col_ind)), shape=(M*(U//stride)*(V//stride), C*U*V))
 
 
-def sparse_toeplitz_avgpool2d(inshape, filtershape, stride):
+def sparse_toeplitz_avgpool2d(inshape, filtershape, stride, homogenize=True, n_processes=1):
     (outchannel, inchannel, filtersize, filtersize) = filtershape
     (M,U,V) = (inshape)
     F = np.zeros(filtershape, dtype=np.float32)
     for k in range(0,outchannel):
         F[k,k,:,:] = 1.0 / (filtersize*filtersize)
-    return sparse_toeplitz_conv2d(inshape, F, bias=None, stride=stride)
+    return sparse_toeplitz_conv2d(inshape, F, bias=None, stride=stride, homogenize=homogenize, n_processes=n_processes)
 
 
 def sparse_channelorder_to_blockorder(shape, blockshape, homogenize=False):
@@ -183,7 +185,6 @@ def sparse_identity_matrix(n, dtype=np.float32):
 
 def sparse_identity_matrix_like(A):
     return scipy.sparse.eye(A.shape[0], dtype=A.dtype)
-
 
 
 def sparse_gaussian_random_diagonal_matrix(n,mu=1,sigma=1,eps=1E-6):
@@ -308,10 +309,10 @@ def is_scipy_sparse(A):
 class SparseMatrix(object):
     def __init__(self, A=None, n_processes=1):
         self._n_processes = n_processes        
-        assert self.is_scipy_sparse(A) or self.is_numpy_dense(A), "Invalid input - %s" % (str(type(A)))
-        self.shape = A.shape  # shape=(H,W)
+        assert A is None or self.is_scipy_sparse(A) or self.is_numpy_dense(A), "Invalid input - %s" % (str(type(A)))
+        self.shape = A.shape if A is not None else (0,0)  # shape=(H,W)
         self._matrix = A.tocsr() if self.is_scipy_sparse(A) else A
-        self.dtype = A.dtype
+        self.dtype = A.dtype if A is not None else None
         self.ndim = 2
 
     def parallel(self, n_processes):
@@ -362,6 +363,9 @@ class SparseMatrix(object):
     def is_sparse(self, x):
         return isinstance(x, SparseMatrix)
 
+    def new(self):
+        return SparseMatrix(n_processes=self._n_processes)
+    
     def clone(self):
         return copy.deepcopy(self)
 
@@ -421,28 +425,27 @@ class SparseMatrix(object):
     def from_torch_conv2d(self, inshape, w, b, stride):
         return SparseMatrix(sparse_toeplitz_conv2d(inshape, w.detach().numpy(), bias=b.detach().numpy(), stride=stride, n_processes=self._n_processes))
 
-    
+
+def coo_range(A, rowrange, colrange):
+    (rows, cols, vals) = zip(*[(i-rowrange[0], j-colrange[0], v) for (i,j,v) in zip(A.row, A.col, A.data) if i>=rowrange[0] and i<rowrange[1] and j>=colrange[0] and j<colrange[1]])
+    return scipy.sparse.coo_matrix( (vals, (rows, cols) ), shape=(rowrange[1]-rowrange[0], colrange[1]-colrange[0]))
+
+
 class SparseTiledMatrix(SparseMatrix):
-    def __init__(self, tilesize=None, coo_matrix=None, tile_to_blkdiag=None, shape=None, n_processes=1):
+    def __init__(self, tilesize=None, coo_matrix=None, tilediag=None, shape=None, n_processes=1):
         self._n_processes = n_processes
         self.dtype = None
-        self.shape = None
-        self.ndim = None
-        self._tilesize = None        
+        self.shape = (0,0) if shape is None else shape
+        self.ndim = 2
+        self._tilesize = 0 if tilesize is None else tilesize
         self._d_blockhash_to_tile = {}
         self._blocklist = []
         
         if coo_matrix is not None and tilesize is not None:
-            self._from_coomatrix(coo_matrix, tilesize)
-        elif tile_to_blkdiag is not None and shape is not None:
-            self._from_tile_to_blkdiag(shape, tile_to_blkdiag)
-        else:
-            raise ValueError('Must provide a valid constructor')
-
-    def parallel(self, n_processes):
-        self._n_processes = n_processes
-        return self
-
+            self.from_coomatrix(coo_matrix, tilesize)
+        elif tilediag is not None and shape is not None:
+            self.from_tilediag(shape, tilediag)
+        
     def __getitem__(self, k):
         if not (isinstance(k, slice) or isinstance(k, tuple)):
             k = slice(k,k+1)  # force result to be 2D
@@ -464,6 +467,9 @@ class SparseTiledMatrix(SparseMatrix):
         m._blocklist = [(i,j,k) for (i,j,k) in m._blocklist if i>=ib and i<=ie and j>=jb and j<=je]
         m._d_blockhash_to_tile = {k:t for (k,t) in m._d_blockhash_to_tile.items() if k in set([k for (i,j,k) in m._blocklist])}
         return m
+
+    def _block(self, B):
+        return SparseMatrix(B, n_processes=self._n_processes)
     
     def __repr__(self):
         return str('<keynet.SparseTiledMatrix: H=%d, W=%d, tilesize=%d, tiles=%d>' % (*self.shape, self.tilesize(), len(self.tiles())))
@@ -473,16 +479,20 @@ class SparseTiledMatrix(SparseMatrix):
 
     def tiles(self):
         return list(self._d_blockhash_to_tile.values())
-    
-    def _block(self, B):
-        return SparseMatrix(B)
-    
-    def is_tiled_sparse(self, x):
-        return isinstance(x, SparseTiledMatrix)
 
-    def from_torch_conv2d(self, inshape, w, b, stride):
-        return SparseTiledMatrix(coo_matrix=sparse_toeplitz_conv2d(inshape, w.detach().numpy(), bias=b.detach().numpy(), stride=stride, n_processes=self._n_processes), tilesize=self._tilesize, n_processes=self._n_processes)
+    def parallel(self, n_processes):
+        self._n_processes = n_processes
+        return self
+
+    def new(self):
+        return SparseTiledMatrix(n_processes=self._n_processes, tilesize=self.tilesize())
         
+    def is_tiled_sparse(self, A):
+        return isinstance(A, SparseTiledMatrix)
+
+    def from_torch_conv2d(self, inshape, w, b, stride):        
+        return SparseTiledMatrix(coo_matrix=sparse_toeplitz_conv2d(inshape, w.detach().numpy(), bias=b.detach().numpy(), stride=stride, n_processes=self._n_processes), tilesize=self._tilesize, n_processes=self._n_processes)
+                    
     def from_torch_dense(self, A):
         assert self.is_torch_dense(A)
         return SparseTiledMatrix(coo_matrix=scipy.sparse.coo_matrix(A.detach().numpy()), tilesize=self.tilesize(), n_processes=self._n_processes)
@@ -491,7 +501,7 @@ class SparseTiledMatrix(SparseMatrix):
         assert self.is_scipy_sparse(A)
         return SparseTiledMatrix(coo_matrix=A.tocoo(), tilesize=self.tilesize(), n_processes=self._n_processes)
 
-    def _from_coomatrix(self, T, tilesize, verbose=False):
+    def from_coomatrix(self, T, tilesize, verbose=False):
         """Given a sparse matrix T, split into non-overlapping nxn blocks or 'tiles' of size self._tilesize x self.Blocksize, and 
            return an indexed representation for unique submatrices which provides memory efficient matrix vector multiplication when T is self-similar.
         
@@ -508,9 +518,8 @@ class SparseTiledMatrix(SparseMatrix):
         self.ndim = 2
         T = T.tocoo()        
         
-        if T.shape[0] > tilesize:
-            csr_matrix = T.tocsr()
-            T_rows = Parallel(n_jobs=self._n_processes)(delayed(SparseTiledMatrix)(tilesize, csr_matrix[i:i+tilesize]) for i in np.arange(0, T.shape[0], tilesize))
+        if T.shape[0] > tilesize and self._n_processes > 1:
+            T_rows = Parallel(n_jobs=self._n_processes)(delayed(SparseTiledMatrix)(tilesize=tilesize, n_processes=1, coo_matrix=coo_range(T, (i, min(i+tilesize, T.shape[0])), (0, T.shape[1]))) for i in np.arange(0, T.shape[0], tilesize))
             self._d_blockhash_to_tile = {k:b for t in T_rows for (k,b) in t._d_blockhash_to_tile.items()}  # unique
             self._blocklist = []
             for (i,t) in enumerate(T_rows):
@@ -551,7 +560,7 @@ class SparseTiledMatrix(SparseMatrix):
         self._d_blockhash_to_tile = M
         return self
 
-    def _from_tile_to_blkdiag(self, shape, T):
+    def from_tilediag(self, shape, T):
         """Construct block diagonal matrix from tile T repeated down the main diagonal"""
         assert T.shape[0] == T.shape[1] and T.ndim == 2, "Invalid block, must be square"
         
@@ -589,18 +598,18 @@ class SparseTiledMatrix(SparseMatrix):
                 y[i*n:H_clip, :] += self._d_blockhash_to_tile[k].ascsr().torchdot(x[j*n:W_clip, :])
         return y
                 
-    def matmul(self, other, verbose=True):
+    def matmul(self, other, verbose=False):
         """For two Tiled() object T1, T2, compute T1.dot(T2) and save in T1"""
         assert isinstance(other, SparseTiledMatrix) or isinstance(other, SparseMatrix), "Invalid input - Must be SparseMatrix()"
         assert other.shape[0] == self.shape[1], "Non-conformal shape"        
         
-        #if isinstance(other, SparseMatrix) and not isinstance(other, SparseTiledMatrix):
-        #    # Downgrade to sparse matrix, multiply then upgrade to SparseTiledMatrix (expensive)
-        #    return self._from_coomatrix(SparseMatrix(self.tocoo()).matmul(other).tocoo(), self.tilesize())
-        
-        if True:
+        if isinstance(other, SparseMatrix) and not isinstance(other, SparseTiledMatrix):
             # Downgrade to sparse matrix, multiply then upgrade to SparseTiledMatrix (expensive)
-            return self._from_coomatrix(SparseMatrix(self.tocoo()).matmul(SparseMatrix(other.tocoo())).tocoo(), self.tilesize())
+            #return self.from_coomatrix(SparseMatrix(self.tocoo()).matmul(other).tocoo(), self.tilesize())
+            return self.from_coomatrix(self.tocoo().dot(other.tocoo()), self.tilesize())
+        else:
+            # Downgrade to sparse matrix, multiply then upgrade to SparseTiledMatrix (expensive)
+            return self.from_coomatrix(self.tocoo().dot(other.tocoo()), self.tilesize())
 
         assert other._tilesize == self._tilesize, "Non-conformal tilesize"    
         n = self.tilesize()
@@ -648,8 +657,8 @@ class SparseTiledMatrix(SparseMatrix):
         """Convert to Scipy COOrdinate sparse matrix, this is an expensive operation that should be used for small matrices only and for testing purposes"""
         ((H,W), n) = (self.shape, self._tilesize)
         d = {(i*n, j*n):self._d_blockhash_to_tile[k].tocoo() for (i,j,k) in self._blocklist}
-        B = [ [d[(i,j)] if (i,j) in d else None for j in range(0,W,n)] for i in range(0,H,n)]            
-        return scipy.sparse.bmat([ [d[(i,j)] if (i,j) in d else None for j in range(0,W,n)] for i in range(0,H,n)], format='coo')
+        B = [ [d[(i,j)] if (i,j) in d else None for j in range(0, W, max(n,1))] for i in range(0, H, max(n,1))]
+        return scipy.sparse.bmat(B, format='coo') if len(B)>0 else scipy.sparse.coo_matrix((H,W))
 
     def nnz(self):
         return sum([m.nnz() for m in self._d_blockhash_to_tile.values()])
@@ -661,29 +670,29 @@ class SparseTiledMatrix(SparseMatrix):
 def sparse_diagonal_tiled_identity_matrix_with_inverse(N, tilesize, tiler=SparseTiledMatrix):
     """(NxN) identity matrix, with one (tilesize, tilesize) identity matrix repeated along main diagonal"""
     (B, Binv) = (sparse_identity_matrix(tilesize), sparse_identity_matrix(tilesize))
-    return (tiler(shape=(N,N), tile_to_blkdiag=B.todense(), tilesize=tilesize),
-            tiler(shape=(N,N), tile_to_blkdiag=Binv.todense(), tilesize=tilesize))
+    return (tiler(shape=(N,N), tilediag=B.todense(), tilesize=tilesize),
+            tiler(shape=(N,N), tilediag=Binv.todense(), tilesize=tilesize))
 
 
 def sparse_block_diagonal_tiled_permutation_matrix_with_inverse(N, tilesize, tiler=SparseTiledMatrix):
     """(NxN) block diagonal matrix with one (tilesize x tilesize) permutation matrix repeated along main diagonal"""
     (B, Binv) = sparse_permutation_matrix_with_inverse(tilesize)
-    return (tiler(shape=(N,N), tile_to_blkdiag=B.todense(), tilesize=tilesize),
-            tiler(shape=(N,N), tile_to_blkdiag=Binv.todense(), tilesize=tilesize))
+    return (tiler(shape=(N,N), tilediag=B.todense(), tilesize=tilesize),
+            tiler(shape=(N,N), tilediag=Binv.todense(), tilesize=tilesize))
 
 
 def sparse_block_diagonal_tiled_generalized_permutation_matrix_with_inverse(N, tilesize, beta, tiler=SparseTiledMatrix):
     """(NxN) block diagonal matrix with one (tilesize, tilesize) generalized permutation matrix repeated along main diagonal""" 
     (B, Binv) = sparse_generalized_permutation_matrix_with_inverse(tilesize, beta)
-    return (tiler(shape=(N,N), tile_to_blkdiag=B.todense(), tilesize=tilesize),
-            tiler(shape=(N,N), tile_to_blkdiag=Binv.todense(), tilesize=tilesize))
+    return (tiler(shape=(N,N), tilediag=B.todense(), tilesize=tilesize),
+            tiler(shape=(N,N), tilediag=Binv.todense(), tilesize=tilesize))
 
 
 def sparse_block_diagonal_tiled_generalized_stochastic_matrix_with_inverse(N, tilesize, alpha, beta=0, tiler=SparseTiledMatrix):
     """(NxN) block diagonal matrix with one (tilesize, tilesize) generalized stochastic matrix repeated along main diagonal""" 
     (B, Binv) = sparse_generalized_stochastic_matrix_with_inverse(tilesize, alpha, beta)
-    return (tiler(shape=(N,N), tile_to_blkdiag=B.todense(), tilesize=tilesize),
-            tiler(shape=(N,N), tile_to_blkdiag=Binv.todense(), tilesize=tilesize))
+    return (tiler(shape=(N,N), tilediag=B.todense(), tilesize=tilesize),
+            tiler(shape=(N,N), tilediag=Binv.todense(), tilesize=tilesize))
 
 
 def sparse_block_permutation_tiled_identity_matrix_with_inverse(squareshape, tilesize, tiler=SparseTiledMatrix):

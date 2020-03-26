@@ -78,7 +78,7 @@ class KeyedConv2d(KeyedLayer):
                 w.shape[1] == self.in_channels and
                 w.shape[2] == self.kernel_size and
                 b.shape[0] == self.out_channels), "Invalid input"
-        W = Ainv.from_torch_conv2d(self.inshape, w, b, self.stride)  # parallelized
+        W = Ainv.new().from_torch_conv2d(self.inshape, w, b, self.stride)  # parallelized
         return super(KeyedConv2d, self).key(W, A, Ainv)
 
         
@@ -93,7 +93,7 @@ class KeyedLinear(KeyedLayer):
         return str('<KeyedLinear: in_features=%d, out_features=%d%s>' % (self.in_features, self.out_features, str_shape))
         
     def key(self, w, b, A, Ainv):
-        W = Ainv.from_torch_dense(homogenize_matrix(w, b).t())  # transposed for right multiply
+        W = Ainv.new().from_torch_dense(homogenize_matrix(w, b).t())  # transposed for right multiply
         return super(KeyedLinear, self).key(W, A, Ainv)
 
     
@@ -124,7 +124,7 @@ class KeyedAvgpool2d(KeyedLayer):
         return str('<KeyedAvgpool2d: kernel_size=%s, stride=%s%s>' % (str(self.kernel_size), str(self.stride), str_shape))
     
     def key(self, A, Ainv):
-        W = Ainv.from_scipy_sparse(sparse_toeplitz_avgpool2d(self.inshape, (self.inshape[0], self.inshape[0], self.kernel_size, self.kernel_size), self.stride))  # Expensive
+        W = Ainv.new().from_scipy_sparse(sparse_toeplitz_avgpool2d(self.inshape, (self.inshape[0], self.inshape[0], self.kernel_size, self.kernel_size), self.stride))  # Expensive
         return super(KeyedAvgpool2d, self).key(W, A, Ainv)
 
 
