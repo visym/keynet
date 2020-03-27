@@ -128,6 +128,7 @@ class KeyedModel(object):
     def layers(self):
         return self._layernames
 
+
 class KeyedSensor(keynet.layer.KeyedLayer):
     def __init__(self, inshape, keypair, reorder=None):
         super(KeyedSensor, self).__init__() 

@@ -22,7 +22,7 @@ from keynet.util import blockview
 from joblib import Parallel, delayed
 import vipy
 import warnings
-
+from tqdm import tqdm
 
 def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1, homogenize=True, n_processes=1, _row=None):
     """ Returns sparse toeplitz matrix (W) in coo format that is equivalent to per-channel pytorch conv2d (spatial correlation) of filter f with a given image with shape=inshape vectorized
@@ -32,7 +32,7 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1,
     
     if n_processes > 1 or _row is None:
         # Parallelize construction by row
-        T = Parallel(n_jobs=n_processes)(delayed(sparse_toeplitz_conv2d)(inshape, f, bias, as_correlation, stride, n_processes=1, _row=i) for i in np.arange(0, inshape[1], stride))
+        T = Parallel(n_jobs=n_processes)(delayed(sparse_toeplitz_conv2d)(inshape, f, bias, as_correlation, stride, n_processes=1, _row=i) for i in tqdm(np.arange(0, inshape[1], stride)))
         (rows, cols, vals) = zip(*[(i,j,v) for t in T for (i,j,v) in zip(t.row, t.col, t.data)])  # merge
         T = scipy.sparse.coo_matrix( (vals, (rows, cols)), shape=(T[0].shape))
 
@@ -432,7 +432,7 @@ def coo_range(A, rowrange, colrange):
 
 
 class SparseTiledMatrix(SparseMatrix):
-    def __init__(self, tilesize=None, coo_matrix=None, tilediag=None, shape=None, n_processes=1):
+    def __init__(self, tilesize=None, coo_matrix=None, tilediag=None, shape=None, n_processes=1, slice=None):
         self._n_processes = n_processes
         self.dtype = None
         self.shape = (0,0) if shape is None else shape
@@ -442,7 +442,7 @@ class SparseTiledMatrix(SparseMatrix):
         self._blocklist = []
         
         if coo_matrix is not None and tilesize is not None:
-            self.from_coomatrix(coo_matrix, tilesize)
+            self.from_coomatrix(coo_matrix, tilesize, slice=slice)
         elif tilediag is not None and shape is not None:
             self.from_tilediag(shape, tilediag)
         
@@ -501,7 +501,7 @@ class SparseTiledMatrix(SparseMatrix):
         assert self.is_scipy_sparse(A)
         return SparseTiledMatrix(coo_matrix=A.tocoo(), tilesize=self.tilesize(), n_processes=self._n_processes)
 
-    def from_coomatrix(self, T, tilesize, verbose=False):
+    def from_coomatrix(self, T, tilesize, verbose=False, slice=None):
         """Given a sparse matrix T, split into non-overlapping nxn blocks or 'tiles' of size self._tilesize x self.Blocksize, and 
            return an indexed representation for unique submatrices which provides memory efficient matrix vector multiplication when T is self-similar.
         
@@ -517,29 +517,31 @@ class SparseTiledMatrix(SparseMatrix):
         self.shape = (T.shape[0], T.shape[1])
         self.ndim = 2
         T = T.tocoo()        
-        
-        if T.shape[0] > tilesize and self._n_processes > 1:
-            T_rows = Parallel(n_jobs=self._n_processes)(delayed(SparseTiledMatrix)(tilesize=tilesize, n_processes=1, coo_matrix=coo_range(T, (i, min(i+tilesize, T.shape[0])), (0, T.shape[1]))) for i in np.arange(0, T.shape[0], tilesize))
+
+        if slice is not None:
+            ((ib,ie), (jb,je)) = slice
+            T = coo_range(T, (ib, ie), (jb, je))
+
+        if T.shape[0] > tilesize and self._n_processes > 1:        
+            print('FLAG1: %s' % str(self))
+            T_rows = Parallel(n_jobs=self._n_processes)(delayed(SparseTiledMatrix)(tilesize=tilesize, n_processes=1, coo_matrix=T, slice=((i, min(i + (T.shape[0]//(4*self._n_processes)), T.shape[0])), (0, T.shape[1]))) for i in tqdm(np.arange(0, T.shape[0], T.shape[0]//(4*self._n_processes))))
+            print('FLAG2a: %s' % str(self))
             self._d_blockhash_to_tile = {k:b for t in T_rows for (k,b) in t._d_blockhash_to_tile.items()}  # unique
             self._blocklist = []
             for (i,t) in enumerate(T_rows):
                 self._blocklist.extend([(i,j,k) for (ii,j,k) in t._blocklist])
             self.shape = (T.shape[0], T.shape[1])
+            print('FLAG2b: %s' % str(self))
             return self
 
         n = tilesize
         (H,W) = self.shape        
 
-        # Faster than groupby
+        # Faster than groupby for large matrices
         d_blockidx_to_rows_cols_vals = defaultdict(list)
         for (i,j,v) in zip(T.row, T.col, T.data):
             d_blockidx_to_rows_cols_vals[ (i//n, j//n) ].append( (i,j,v) )
 
-        # Slow for large matrices
-        #ijv = [(i,j,v, (i//n,j//n)) for (i,j,v) in zip(T.row, T.col, T.data)]  # preallocate
-        #ijv.sort(key=lambda x: x[3])  # in-place sort for groupby, sort only indexes
-        #d_blockidx_to_rows_cols_vals = {k:(tuple(zip(*tuple(v)))[0:3]) for (k,v) in groupby(ijv, key=lambda x: x[3])}
-        
         # Single process hashing and tiling
         d = d_blockidx_to_rows_cols_vals
         (B, M, n) = ([], {}, tilesize)              
@@ -606,9 +608,11 @@ class SparseTiledMatrix(SparseMatrix):
         if isinstance(other, SparseMatrix) and not isinstance(other, SparseTiledMatrix):
             # Downgrade to sparse matrix, multiply then upgrade to SparseTiledMatrix (expensive)
             #return self.from_coomatrix(SparseMatrix(self.tocoo()).matmul(other).tocoo(), self.tilesize())
+            print('FLAG3: %s' % str(self))
             return self.from_coomatrix(self.tocoo().dot(other.tocoo()), self.tilesize())
         else:
             # Downgrade to sparse matrix, multiply then upgrade to SparseTiledMatrix (expensive)
+            print('FLAG3: %s' % str(self))
             return self.from_coomatrix(self.tocoo().dot(other.tocoo()), self.tilesize())
 
         assert other._tilesize == self._tilesize, "Non-conformal tilesize"    

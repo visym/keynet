@@ -25,6 +25,7 @@ import keynet.fiberbundle
 import vipy
 from vipy.util import Stopwatch
 import keynet.system
+import keynet.vgg
 
 
 def test_torch_homogenize():
@@ -459,16 +460,22 @@ def test_memory_order():
     (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 4, n_processes=24, order='block')    
     print(vipy.util.save((sensor, knet), 'keynet_allconv_tiled_blockorder.pkl'))
     return
-    
+
+def test_vgg16():
+    net = keynet.vgg.VGG16()
+    print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
+    (sensor, model) = keynet.system.TiledIdentityKeynet( (3, 224, 224), net, 32, n_processes=48)
+    print('vgg16: keynet num parameters=%d' % model.num_parameters())
+    return 
+
 if __name__ == '__main__':
+    #test_torch_homogenize()
+    #test_sparse_toeplitz_conv2d()
+    #test_sparse_toeplitz_avgpool2d()
+    #test_blockview()
+    #test_sparse_matrix()
+    #test_sparse_tiled_matrix()        
+    #test_keynet_scipy()
     #test_memory_order()
-
-    test_torch_homogenize()
-    test_sparse_toeplitz_conv2d()
-    test_sparse_toeplitz_avgpool2d()
-    test_blockview()
-    test_sparse_matrix()
-    test_sparse_tiled_matrix()        
-    test_keynet_scipy()
     #test_keynet_mnist()
-
+    test_vgg16()
