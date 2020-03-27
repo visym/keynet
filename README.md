@@ -21,3 +21,8 @@ pip3 install cupy ipython
 python test_keynet.py
 ```
 
+```ipython
+import demo
+demo.mnist()
+```
+

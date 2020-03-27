@@ -475,7 +475,9 @@ if __name__ == '__main__':
     test_blockview()
     test_sparse_matrix()
     test_sparse_tiled_matrix()        
-    #test_keynet_scipy()
+    test_keynet_scipy()    
+    
     #test_memory_order()
     #test_keynet_mnist()
     test_vgg16()
+
