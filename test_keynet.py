@@ -469,12 +469,12 @@ def test_vgg16():
     return 
 
 if __name__ == '__main__':
-    #test_torch_homogenize()
-    #test_sparse_toeplitz_conv2d()
-    #test_sparse_toeplitz_avgpool2d()
-    #test_blockview()
-    #test_sparse_matrix()
-    #test_sparse_tiled_matrix()        
+    test_torch_homogenize()
+    test_sparse_toeplitz_conv2d()
+    test_sparse_toeplitz_avgpool2d()
+    test_blockview()
+    test_sparse_matrix()
+    test_sparse_tiled_matrix()        
     #test_keynet_scipy()
     #test_memory_order()
     #test_keynet_mnist()
