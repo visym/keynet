@@ -6,7 +6,7 @@ import torchvision.transforms as transforms
 import torch.nn.functional as F
 
 
-def prepare_vggface_image(img):
+def prepare_vgg16_image(img):
     """
     Convert an RGB byte image to a FloatTensor suitable for processing with the network.
     This function assumes the image has already been resized, cropped, jittered, etc.
@@ -20,7 +20,7 @@ def prepare_vggface_image(img):
     return torch.from_numpy(img_bgr_fp).float()
 
 
-def vggface_preprocess(jitter=False, blur_radius=None, blur_prob=1.0):
+def vgg16_preprocess(jitter=False, blur_radius=None, blur_prob=1.0):
     transform_list = [transforms.Resize(256),]
     if jitter:
         transform_list.append(transforms.RandomCrop((224,224)))
@@ -31,7 +31,7 @@ def vggface_preprocess(jitter=False, blur_radius=None, blur_prob=1.0):
     if blur_radius is not None and blur_prob > 0:
         transform_list.append(transforms.Lambda(generate_random_blur(blur_radius, blur_prob)))
     # finally, convert PIL RGB image to FloatTensor
-    transform_list.append(transforms.Lambda(prepare_vggface_image))
+    transform_list.append(transforms.Lambda(prepare_vgg16_image))
     return transforms.Compose(transform_list)
 
 
@@ -90,12 +90,8 @@ class VGG16(nn.Module):
 
 
     def forward(self, input):
-        """
-        Run the network.
-        Input should be Nx3x224x224.
-        Based on self.mode, return output of fc7, fc8, or both.
-        """
         assert len(input.size()) == 4
+        assert input.shape[1] == 3 and input.shape[2] == 224 and input.shape[3] == 224, "Invalid input shape - must be Nx3n224x224"
 
         e1_1 = self.relu1_1(self.conv1_1(input))
         e1_2 = self.pool1_2(self.relu1_2(self.conv1_2(e1_1)))
@@ -129,6 +125,6 @@ def vgg16(pthfile):
     """
     Constructs a VGG-16 model
     """
-    model = VGGFace()
+    model = VGG16()
     model.load_state_dict(torch.load(pthfile))
     return model
