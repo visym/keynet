@@ -371,16 +371,25 @@ def print_parameters():
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)    
     print('[figures.print_parameters]:  IdentityKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))
 
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 8, n_processes=8)    
+    (sensor, knet) = keynet.system.PermutationKeynet(inshape, net)    
+    print('[figures.print_parameters]:  PermutationKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))
+
+    (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=2, beta=1)    
+    print('[figures.print_parameters]:  StochasticKeynet (allconvnet) alpha=2 parameters=%d' % (knet.num_parameters()))
+
+    (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=4, beta=1)    
+    print('[figures.print_parameters]:  StochasticKeynet (allconvnet) alpha=4 parameters=%d' % (knet.num_parameters()))
+
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 8, n_processes=2)    
     print('[figures.print_parameters]:  TiledIdentityKeynet-4 (allconvnet) parameters=%d' % (knet.num_parameters()))    
 
-    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, 8, n_processes=8)
+    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, 8, n_processes=2)
     print('[figures.print_parameters]:  TiledPermutationKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))        
 
-    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 8, n_processes=8, alpha=2, beta=1)
+    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 8, n_processes=2, alpha=2, beta=1)
     print('[figures.print_parameters]:  TiledStochasticKeynet (allconvnet) alpha=2, beta=1, parameters=%d' % (knet.num_parameters()))        
 
-    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 8, n_processes=8, alpha=4, beta=1)
+    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 8, n_processes=2, alpha=4, beta=1)
     print('[figures.print_parameters]:  TiledStochasticKeynet (allconvnet) alpha=4, beta=1, parameters=%d' % (knet.num_parameters()))        
     
 

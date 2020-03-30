@@ -43,7 +43,7 @@ class KeyedLayer(nn.Module):
 
     
 class KeyedConv2d(KeyedLayer):
-    def __init__(self, inshape, in_channels, out_channels, kernel_size, stride):
+    def __init__(self, inshape, in_channels, out_channels, kernel_size, stride, verbose=True):
         super(KeyedConv2d, self).__init__()
 
         assert len(kernel_size)==1 or len(kernel_size)==2 and (kernel_size[0] == kernel_size[1]), "Kernel must be square"
@@ -55,6 +55,7 @@ class KeyedConv2d(KeyedLayer):
         self.out_channels = out_channels
         self.inshape = inshape
         assert len(inshape) == 3, "Inshape must be (C,H,W) for the shape of the tensor at the input to this layer"""
+        self._verbose = verbose
 
     def extra_repr(self):
         str_shape = ', backend=%s, shape=%s, nnz=%d>' % (str(type(self.W)), str(self.W.shape), self.nnz()) if self.W is not None else '>'

@@ -207,10 +207,11 @@ class OpticalFiberBundle(KeyedSensor):
     def image(self):
         return self._im
     
+
 class KeyPair(object):
-    def __init__(self, backend='scipy', n_processes=1):
+    def __init__(self, backend='scipy', n_processes=1, verbose=False):
         self._SparseMatrix = lambda *args, **kw: keynet.sparse.SparseMatrix(*args, **kw, n_processes=n_processes) if backend=='scipy' else keynet.torch.SparseMatrix(*args, **kw, n_processes=n_processes)
-        self._SparseTiledMatrix = lambda *args, **kw: keynet.sparse.SparseTiledMatrix(*args, **kw, n_processes=n_processes) if backend=='scipy' else keynet.torch.SparseTiledMatrix(*args, **kw, n_processes=n_processes)
+        self._SparseTiledMatrix = lambda *args, **kw: keynet.sparse.SparseTiledMatrix(*args, **kw, n_processes=n_processes, verbose=verbose) if backend=='scipy' else keynet.torch.SparseTiledMatrix(*args, **kw, n_processes=n_processes)
         
     def identity(self):
         return lambda layername, outshape: (self._SparseMatrix(sparse_identity_matrix(np.prod(outshape)+1).tocoo()),
@@ -257,13 +258,13 @@ class KeyPair(object):
         return lambda layername, outshape: tuple(f(outshape, A) for (f,A) in zip([f_channel_to_block, f_block_to_channel], sparse_diagonal_tiled_identity_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix)))
     
     
-def keygen(format, backend, alpha=None, beta=0, tilesize=None, n_processes=1):
+def keygen(format, backend, alpha=None, beta=0, tilesize=None, n_processes=1, verbose=False):
     formats = set(['identity', 'permutation', 'stochastic', 'tiled-identity', 'tiled-identity-blockorder', 'tiled-permutation', 'tiled-stochastic', 'tiled-blockpermutation'])
     backends = set(['torch', 'scipy'])
     assert format in formats, "Invalid format '%s' - must be in '%s'" % (format, str(formats))
     assert backend in backends, "Invalid backend '%s' - must be in '%s'" % (backend, str(backends))
 
-    keypair = KeyPair(backend, n_processes)
+    keypair = KeyPair(backend, n_processes, verbose=verbose)
     if format == 'identity':
         return keypair.identity()
     elif format == 'permutation':
@@ -284,8 +285,8 @@ def keygen(format, backend, alpha=None, beta=0, tilesize=None, n_processes=1):
         raise ValueError("Invalid format '%s' - must be in '%s'" % (format, str(formats)))
 
     
-def Keynet(inshape, net, format, backend, do_output_encryption=False, verbose=True, alpha=None, beta=None, tilesize=None, n_processes=1):
-    f_keypair = keygen(format, backend, alpha, beta, tilesize, n_processes=n_processes)
+def Keynet(inshape, net, format, backend, do_output_encryption=False, verbose=False, alpha=None, beta=None, tilesize=None, n_processes=1):
+    f_keypair = keygen(format, backend, alpha, beta, tilesize, n_processes=n_processes, verbose=verbose)
     sensor = KeyedSensor(inshape, f_keypair('input', inshape))
     model = KeyedModel(net, inshape, sensor.key(), f_keypair, do_output_encryption=do_output_encryption, verbose=verbose)
     return (sensor, model)
@@ -314,8 +315,8 @@ def TiledPermutationKeynet(inshape, net, tilesize, do_output_encryption=False, n
     return Keynet(inshape, net, 'tiled-permutation', 'scipy', do_output_encryption, tilesize=tilesize, n_processes=n_processes)
 
 
-def TiledStochasticKeynet(inshape, net, tilesize, alpha, beta=0, do_output_encryption=False, n_processes=1):
-    return Keynet(inshape, net, 'tiled-stochastic', 'scipy', do_output_encryption, tilesize=tilesize, alpha=alpha, beta=beta, n_processes=n_processes)
+def TiledStochasticKeynet(inshape, net, tilesize, alpha, beta=0, do_output_encryption=False, n_processes=1, verbose=True):
+    return Keynet(inshape, net, 'tiled-stochastic', 'scipy', do_output_encryption, tilesize=tilesize, alpha=alpha, beta=beta, n_processes=n_processes, verbose=verbose)
 
 
 def TiledStochasticKeySensor(inshape, tilesize, alpha, beta=0):

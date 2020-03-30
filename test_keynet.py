@@ -478,6 +478,14 @@ def test_vgg16_permutation():
     print(vipy.util.save((sensor, model), 'keynet_vgg16_tiled_permutation.pkl'))
 
 
+def test_vgg16_stochastic():
+    net = keynet.vgg.VGG16()
+    print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
+    (sensor, model) = keynet.system.TiledStochasticKeynet( (3, 224, 224), net, 32, n_processes=48, alpha=2, beta=1.0, verbose=True)
+    print('vgg16: keynet num parameters=%d' % model.num_parameters())
+    print(vipy.util.save((sensor, model), 'keynet_vgg16_tiled_stochastic_alpha%d_tile%d.pkl' % (2, 32)))
+
+
 if __name__ == '__main__':
     test_torch_homogenize()
     test_sparse_toeplitz_conv2d()
@@ -485,9 +493,10 @@ if __name__ == '__main__':
     test_blockview()
     test_sparse_matrix()
     test_sparse_tiled_matrix()        
-    test_keynet_scipy()    
+    #test_keynet_scipy()    
     
+    test_vgg16_stochastic()
     #test_memory_order()
     #test_keynet_mnist()
-    test_vgg16_permutation()
-    test_vgg16()
+    #test_vgg16_permutation()
+    #test_vgg16()
