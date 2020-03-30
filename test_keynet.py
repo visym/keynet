@@ -93,7 +93,7 @@ def test_blockview():
 
 
 def show_sparse_blockkey(n=32):
-    im = vipy.image.Image('owl.jpg').resize(256,256).grey()
+    im = vipy.image.Image('./demo/owl.jpg').resize(256,256).grey()
     img = im.numpy()
     x = img.flatten()
     # b = scipy.sparse.coo_matrix(keynet.util.random_dense_permutation_matrix(n).astype(np.float32))
@@ -125,7 +125,7 @@ def test_sparse_tiled_matrix():
     assert np.allclose(W.todense().astype(np.float32), T.tocoo().todense(), atol=1E-5)
     
     (U,V) = (17,32)
-    im = vipy.image.Image('owl.jpg').resize(U,V).grey()
+    im = vipy.image.Image('./demo/owl.jpg').resize(U,V).grey()
     img = im.tonumpy()
     x = torch.tensor(img.reshape(1,U,V))
     x_torch = homogenize(x)
@@ -182,7 +182,7 @@ def test_sparse_tiled_matrix():
     
 
 def show_channelorder_to_blockorder():
-    im = vipy.image.Image('owl.jpg').greyscale().resize(32, 32, interp='nearest')
+    im = vipy.image.Image('./demo/owl.jpg').greyscale().resize(32, 32, interp='nearest')
     img = im.array()
     img = np.expand_dims(img, 0)  # HxWxC -> 1xCxHxW
     img = np.expand_dims(img, 0)  # HxWxC -> 1xCxHxW    
@@ -268,15 +268,15 @@ def _test_roundoff(m=512, n=1000):
 
 
 def show_fiberbundle_simulation():
-    """Save a temp image containing the fiber bundle simulation for the image 'owl.jpg'"""
-    img_color = np.array(PIL.Image.open('owl.jpg').resize( (512,512) ))
+    """Save a temp image containing the fiber bundle simulation for the image './demo/owl.jpg'"""
+    img_color = np.array(PIL.Image.open('./demo/owl.jpg').resize( (512,512) ))
     img_sim = keynet.fiberbundle.simulation(img_color, h_xtalk=0.05, v_xtalk=0.05, fiber_core_x=16, fiber_core_y=16, do_camera_noise=True)
     return vipy.image.Image(array=np.uint8(img_sim), colorspace='rgb').show().savetmp()
 
 
 def show_fiberbundle_simulation_32x32():
-    """Save a 32x32 CIFAR-10 like temp image containing the fiber bundle simulation for the image 'owl.jpg'"""
-    img_color_large = np.array(PIL.Image.open('owl.jpg').resize( (512,512), PIL.Image.BICUBIC ))  
+    """Save a 32x32 CIFAR-10 like temp image containing the fiber bundle simulation for the image './demo/owl.jpg'"""
+    img_color_large = np.array(PIL.Image.open('./demo/owl.jpg').resize( (512,512), PIL.Image.BICUBIC ))  
     img_sim_large = keynet.fiberbundle.simulation(img_color_large, h_xtalk=0.05, v_xtalk=0.05, fiber_core_x=16, fiber_core_y=16, do_camera_noise=False)
     img_sim = np.array(PIL.Image.fromarray(np.uint8(img_sim_large)).resize( (32,32), PIL.Image.BICUBIC ).resize( (512,512), PIL.Image.NEAREST ))
     return vipy.image.Image(array=np.uint8(img_sim), colorspace='rgb').show().savetmp()
@@ -461,6 +461,7 @@ def test_memory_order():
     print(vipy.util.save((sensor, knet), 'keynet_allconv_tiled_blockorder.pkl'))
     return
 
+
 def test_vgg16():
     net = keynet.vgg.VGG16()
     print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
@@ -484,9 +485,9 @@ if __name__ == '__main__':
     test_blockview()
     test_sparse_matrix()
     test_sparse_tiled_matrix()        
-    #test_keynet_scipy()
+    test_keynet_scipy()    
+    
     #test_memory_order()
     #test_keynet_mnist()
-    
-    #test_vgg16()
     test_vgg16_permutation()
+    test_vgg16()
