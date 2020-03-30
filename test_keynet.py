@@ -468,6 +468,15 @@ def test_vgg16():
     print('vgg16: keynet num parameters=%d' % model.num_parameters())
     return 
 
+
+def test_vgg16_permutation():
+    net = keynet.vgg.VGG16()
+    print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
+    (sensor, model) = keynet.system.TiledPermutationKeynet( (3, 224, 224), net, 32, n_processes=48)
+    print('vgg16: keynet num parameters=%d' % model.num_parameters())
+    print(vipy.util.save((sensor, model), 'keynet_vgg16_tiled_permutation.pkl'))
+
+
 if __name__ == '__main__':
     test_torch_homogenize()
     test_sparse_toeplitz_conv2d()
@@ -478,4 +487,6 @@ if __name__ == '__main__':
     #test_keynet_scipy()
     #test_memory_order()
     #test_keynet_mnist()
-    test_vgg16()
+    
+    #test_vgg16()
+    test_vgg16_permutation()

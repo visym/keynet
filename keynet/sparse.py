@@ -598,9 +598,8 @@ class SparseTiledMatrix(SparseMatrix):
 
         y = torch.zeros((H, x.shape[1])).type(torch.FloatTensor)  # device?        
         for (i,j,k) in self._blocklist:
-            if k is not None:
-                (H_clip, W_clip) = (min(H, i*n+n), min(W, j*n+n))
-                y[i*n:H_clip, :] += self._d_blockhash_to_tile[k].ascsr().torchdot(x[j*n:W_clip, :])
+            (H_clip, W_clip) = (min(H, i*n+n), min(W, j*n+n))
+            y[i*n:H_clip, :] += self._d_blockhash_to_tile[k].ascsr().torchdot(x[j*n:W_clip, :])
         return y
                 
     def matmul(self, other, verbose=False):
