@@ -19,7 +19,7 @@ pip3 install cupy ipython
 # Quickstart
 ```python
 net = LeNet_AvgPool()
-(sensor, knet) = PermutationKeynet(inshape=(1,28,28), net=net(), do_output_encryption=False)
+(sensor, knet) = PermutationKeynet(inshape=(1,28,28), net=net, do_output_encryption=False)
 y = knet.forward(sensor.load('myimage.jpg').encrypt().tensor())
 ```
 

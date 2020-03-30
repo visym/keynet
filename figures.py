@@ -330,34 +330,58 @@ def train_cifar10_allconv_fiberbundle(do_mean_estimation=True, cifardir='/proj/e
 def print_parameters():
     inshape = (1,28,28)
     net = keynet.mnist.LeNet_AvgPool()
-    net.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'));
+    net.load_state_dict(torch.load('../models/mnist_lenet_avgpool.pth'));
     print('[figures.print_parameters]:  lenet parameters=%d' % (keynet.torch.count_parameters(net)))
     
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)
     print('[figures.print_parameters]:  IdentityKeynet (lenet) parameters=%d' % (knet.num_parameters()))        
 
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 28, n_processes=2)
+    (sensor, knet) = keynet.system.PermutationKeynet(inshape, net)
+    print('[figures.print_parameters]:  PermutationKeynet (lenet) parameters=%d' % (knet.num_parameters()))        
+
+    (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=1, beta=1)
+    print('[figures.print_parameters]:  StochasticKeynet (lenet) alpha=1, parameters=%d' % (knet.num_parameters()))         
+   
+    (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=2, beta=1)
+    print('[figures.print_parameters]:  StochasticKeynet (lenet) alpha=2, parameters=%d' % (knet.num_parameters()))        
+
+    (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=4, beta=1)
+    print('[figures.print_parameters]:  StochasticKeynet (lenet) alpha=4, parameters=%d' % (knet.num_parameters()))        
+    
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 7, n_processes=2)
     print('[figures.print_parameters]:  TiledIdentityKeynet (lenet) parameters=%d' % (knet.num_parameters()))        
 
+    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, 7, n_processes=2)
+    print('[figures.print_parameters]:  TiledPermutationKeynet (lenet) parameters=%d' % (knet.num_parameters()))        
+
+    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 7, n_processes=2, alpha=1, beta=1)
+    print('[figures.print_parameters]:  TiledStochasticKeynet (lenet) alpha=1, beta=1, parameters=%d' % (knet.num_parameters()))        
+    
+    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 7, n_processes=2, alpha=2, beta=1)
+    print('[figures.print_parameters]:  TiledStochasticKeynet (lenet) alpha=2, beta=1, parameters=%d' % (knet.num_parameters()))        
+
+    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 7, n_processes=2, alpha=4, beta=1)
+    print('[figures.print_parameters]:  TiledStochasticKeynet (lenet) alpha=4, beta=1, parameters=%d' % (knet.num_parameters()))        
+    
     inshape = (3,32,32)
     net = keynet.cifar10.AllConvNet()    
-    net.load_state_dict(torch.load('./models/cifar10_allconv.pth', map_location=torch.device('cpu')));
+    net.load_state_dict(torch.load('../models/cifar10_allconv.pth', map_location=torch.device('cpu')));
     print('[figures.print_parameters]:  allconvnet parameters=%d' % (keynet.torch.count_parameters(net)))
     
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)    
     print('[figures.print_parameters]:  IdentityKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))
 
     (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 8, n_processes=8)    
-    print('[figures.print_parameters]:  TiledIdentityKeynet-8 (allconvnet) parameters=%d' % (knet.num_parameters()))    
-    
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 32, n_processes=8)    
-    print('[figures.print_parameters]:  TiledIdentityKeynet-32 (allconvnet) parameters=%d' % (knet.num_parameters()))    
+    print('[figures.print_parameters]:  TiledIdentityKeynet-4 (allconvnet) parameters=%d' % (knet.num_parameters()))    
 
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 256, n_processes=8)    
-    print('[figures.print_parameters]:  TiledIdentityKeynet-256 (allconvnet) parameters=%d' % (knet.num_parameters()))    
+    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, 8, n_processes=8)
+    print('[figures.print_parameters]:  TiledPermutationKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))        
 
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 1024, n_processes=8)    
-    print('[figures.print_parameters]:  TiledIdentityKeynet-1024 (allconvnet) parameters=%d' % (knet.num_parameters()))    
+    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 8, n_processes=8, alpha=2, beta=1)
+    print('[figures.print_parameters]:  TiledStochasticKeynet (allconvnet) alpha=2, beta=1, parameters=%d' % (knet.num_parameters()))        
+
+    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 8, n_processes=8, alpha=4, beta=1)
+    print('[figures.print_parameters]:  TiledStochasticKeynet (allconvnet) alpha=4, beta=1, parameters=%d' % (knet.num_parameters()))        
     
 
 if __name__ == '__main__':

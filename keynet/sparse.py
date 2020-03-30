@@ -24,7 +24,8 @@ import vipy
 import warnings
 from tqdm import tqdm
 
-def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1, homogenize=True, n_processes=1, _row=None):
+
+def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1, homogenize=True, n_processes=1, _row=None, verbose=False):
     """ Returns sparse toeplitz matrix (W) in coo format that is equivalent to per-channel pytorch conv2d (spatial correlation) of filter f with a given image with shape=inshape vectorized
         conv2d(img, f) == np.dot(W, img.flatten()), right multiplied
         Example usage: test_keynet.test_sparse_toeplitz_conv2d()
@@ -33,7 +34,7 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1,
     if n_processes > 1 or _row is None:
         # Parallelize construction by row
         irange = np.arange(0, inshape[1], stride)
-        T = Parallel(n_jobs=n_processes)(delayed(sparse_toeplitz_conv2d)(inshape, f, bias, as_correlation, stride, n_processes=1, _row=i) for i in (tqdm(irange) if n_processes>1 else irange))
+        T = Parallel(n_jobs=n_processes)(delayed(sparse_toeplitz_conv2d)(inshape, f, bias, as_correlation, stride, n_processes=1, _row=i) for i in (tqdm(irange) if n_processes>1 and verbose else irange))
         (rows, cols, vals) = zip(*[(i,j,v) for t in T for (i,j,v) in zip(t.row, t.col, t.data)])  # merge
         T = scipy.sparse.coo_matrix( (vals, (rows, cols)), shape=(T[0].shape))
 
@@ -213,7 +214,7 @@ def sparse_random_doubly_stochastic_matrix(n, k, n_iter=100):
 
 
 def sparse_random_diagonally_dominant_doubly_stochastic_matrix(n, k=None, n_iter=100):
-    """Return sparse matrix (nxn) such that at nost k elements per row are non-zero and matrix is positive definite"""
+    """Return sparse matrix (nxn) such that at nost k elements per row are non-zero and matrix is positive definite and doubly stochastic"""
     k = n if k is None else k
     n_iter = 10 if k<=3 else n_iter  # speedup
     d = np.random.rand(k,n)
@@ -524,17 +525,20 @@ class SparseTiledMatrix(SparseMatrix):
             T = coo_range(T, (ib, ie), (jb, je))
             self.shape = T.shape
 
-        if T.shape[0] > tilesize and self._n_processes > 1:        
-            print('[keynet.SparseTiledMatrix]: from_coomatrix (1) = %s' % str(self))
+        if T.shape[0] > tilesize and self._n_processes > 1:
+            if verbose:
+                print('[keynet.SparseTiledMatrix]: from_coomatrix (1) = %s' % str(self))
             n_rows_per_process = max(self.tilesize(), int(self.tilesize() * np.floor((T.shape[0]//(4*self._n_processes)) / self.tilesize())))  # must be multiple of tilesize
-            T_rows = Parallel(n_jobs=self._n_processes)(delayed(SparseTiledMatrix)(tilesize=tilesize, n_processes=1, coo_matrix=T, slice=((i, min(i + n_rows_per_process, T.shape[0])), (0, T.shape[1]))) for i in tqdm(np.arange(0, T.shape[0], n_rows_per_process)))
+            arange = np.arange(0, T.shape[0], n_rows_per_process)
+            T_rows = Parallel(n_jobs=self._n_processes)(delayed(SparseTiledMatrix)(tilesize=tilesize, n_processes=1, coo_matrix=T, slice=((i, min(i + n_rows_per_process, T.shape[0])), (0, T.shape[1]))) for i in (tqdm(arange) if verbose else arange))
             self._d_blockhash_to_tile = {k:b for t in T_rows for (k,b) in t._d_blockhash_to_tile.items()}  # unique
             self._blocklist = []
             U = int(n_rows_per_process // self.tilesize())
             for (i,t) in enumerate(T_rows):
                 self._blocklist.extend([(i*U+ii, j, k) for (ii,j,k) in t._blocklist])
             self.shape = (T.shape[0], T.shape[1])
-            print('[keynet.SparseTiledMatrix]: from_coomatrix (2) = %s' % str(self))
+            if verbose:
+                print('[keynet.SparseTiledMatrix]: from_coomatrix (2) = %s' % str(self))
             return self
 
         n = tilesize
@@ -610,11 +614,13 @@ class SparseTiledMatrix(SparseMatrix):
         if isinstance(other, SparseMatrix) and not isinstance(other, SparseTiledMatrix):
             # Downgrade to sparse matrix, multiply then upgrade to SparseTiledMatrix (expensive)
             #return self.from_coomatrix(SparseMatrix(self.tocoo()).matmul(other).tocoo(), self.tilesize())
-            print('[keynet.SparseTiledMatrix]: matmul(1) self=%s, other=%s' % (str(self), str(other)))
+            if verbose:
+                print('[keynet.SparseTiledMatrix]: matmul(1) self=%s, other=%s' % (str(self), str(other)))
             return self.from_coomatrix(self.tocoo().dot(other.tocoo()), self.tilesize())
         else:
             # Downgrade to sparse matrix, multiply then upgrade to SparseTiledMatrix (expensive)
-            print('[keynet.SparseTiledMatrix]: matmul(2) self=%s, other=%s' % (str(self), str(other)))
+            if verbose:
+                print('[keynet.SparseTiledMatrix]: matmul(2) self=%s, other=%s' % (str(self), str(other)))
             return self.from_coomatrix(self.tocoo().dot(other.tocoo()), self.tilesize())
 
         assert other._tilesize == self._tilesize, "Non-conformal tilesize"    
