@@ -330,7 +330,7 @@ def train_cifar10_allconv_fiberbundle(do_mean_estimation=True, cifardir='/proj/e
 def print_parameters():
     inshape = (1,28,28)
     net = keynet.mnist.LeNet_AvgPool()
-    net.load_state_dict(torch.load('../models/mnist_lenet_avgpool.pth'));
+    net.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'));
     print('[figures.print_parameters]:  lenet parameters=%d' % (keynet.torch.count_parameters(net)))
     
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)
@@ -365,7 +365,7 @@ def print_parameters():
     
     inshape = (3,32,32)
     net = keynet.cifar10.AllConvNet()    
-    net.load_state_dict(torch.load('../models/cifar10_allconv.pth', map_location=torch.device('cpu')));
+    net.load_state_dict(torch.load('./models/cifar10_allconv.pth', map_location=torch.device('cpu')));
     print('[figures.print_parameters]:  allconvnet parameters=%d' % (keynet.torch.count_parameters(net)))
     
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)    
