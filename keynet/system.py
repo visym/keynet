@@ -24,7 +24,7 @@ import keynet.torch
 
 
 class KeyedModel(object):
-    def __init__(self, net, inshape, inkey, f_layername_to_keypair, do_output_encryption=False, verbose=True):
+    def __init__(self, net, inshape, inkey, f_layername_to_keypair, do_output_encryption=False, verbose=False):
         # Assign layerkeys using provided lambda function
         net.eval()
         netshape = keynet.torch.netshape(net, inshape)
@@ -304,7 +304,7 @@ def StochasticKeynet(inshape, net, alpha, beta=0, do_output_encryption=False):
     return Keynet(inshape, net, 'stochastic', 'scipy', do_output_encryption, alpha=alpha, beta=beta)    
 
 
-def TiledIdentityKeynet(inshape, net, tilesize, n_processes=1, verbose=True, order='channel'):
+def TiledIdentityKeynet(inshape, net, tilesize, n_processes=1, verbose=False, order='channel'):
     if order == 'channel':
         return Keynet(inshape, net, 'tiled-identity', 'scipy', do_output_encryption=False, tilesize=tilesize, n_processes=n_processes, verbose=verbose)
     else:
@@ -315,7 +315,7 @@ def TiledPermutationKeynet(inshape, net, tilesize, do_output_encryption=False, n
     return Keynet(inshape, net, 'tiled-permutation', 'scipy', do_output_encryption, tilesize=tilesize, n_processes=n_processes)
 
 
-def TiledStochasticKeynet(inshape, net, tilesize, alpha, beta=0, do_output_encryption=False, n_processes=1, verbose=True):
+def TiledStochasticKeynet(inshape, net, tilesize, alpha, beta=0, do_output_encryption=False, n_processes=1, verbose=False):
     return Keynet(inshape, net, 'tiled-stochastic', 'scipy', do_output_encryption, tilesize=tilesize, alpha=alpha, beta=beta, n_processes=n_processes, verbose=verbose)
 
 

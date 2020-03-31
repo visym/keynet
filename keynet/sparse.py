@@ -232,8 +232,8 @@ def sparse_random_diagonally_dominant_doubly_stochastic_matrix(n, k=None, n_iter
     
 
 def sparse_stochastic_matrix_with_inverse(n, m): 
-    """Returns (A,Ainv) for (nxn) sparse matrix of the form P*S*I, where S is block diagonal of size m, and P is permutation"""
-    """Setting m=1 results in a permutation matrix"""
+    """Returns (A,Ainv) for (nxn) sparse matrix of the form P*S*I, where S is block diagonal of size m, and P is permutation
+       Setting m=1 results in a permutation matrix"""
     #assert(k<=m and n>=m) 
     m = np.minimum(n,m)
 
@@ -385,12 +385,12 @@ class SparseMatrix(object):
         return SparseMatrix(A)
     
     def matmul(self, A):
-        assert isinstance(A, SparseMatrix)
-        if self.is_scipy_sparse(self._matrix):
-            self._matrix = self._matrix.tocsr()
-        if self.is_scipy_sparse(A._matrix):
-            A._matrix = A._matrix.tocsc()
-        self._matrix = scipy.sparse.csr_matrix.dot(self._matrix, A._matrix)
+        assert isinstance(A, SparseMatrix) or self.is_scipy_sparse(A)
+        #if self.is_scipy_sparse(self._matrix):
+        #    self._matrix = self._matrix.tocoo()
+        #if self.is_scipy_sparse(A._matrix):
+        #    A._matrix = A._matrix.tocoo()
+        self._matrix = scipy.sparse.coo_matrix.dot(self._matrix, A._matrix if isinstance(A, SparseMatrix) else A)
         self.shape = self._matrix.shape
         return self
 
@@ -417,11 +417,11 @@ class SparseMatrix(object):
     def tocoo(self):
         return self._matrix.tocoo() if is_scipy_sparse(self._matrix) else scipy.sparse.coo_matrix(self._matrix)
 
-    def ascsr(self):
+    def tocsr(self):
         self._matrix = self._matrix.tocsr()
         return self
 
-    def ascsc(self):
+    def tocsc(self):
         self._matrix = self._matrix.tocsc()
         return self
 
@@ -435,7 +435,7 @@ def coo_range(A, rowrange, colrange):
 
 
 class SparseTiledMatrix(SparseMatrix):
-    def __init__(self, tilesize=None, coo_matrix=None, tilediag=None, shape=None, n_processes=1, slice=None, verbose=True):
+    def __init__(self, tilesize=None, coo_matrix=None, tilediag=None, shape=None, n_processes=1, slice=None, verbose=False):
         self._n_processes = n_processes
         self.dtype = None
         self.shape = (0,0) if shape is None else shape
@@ -520,8 +520,8 @@ class SparseTiledMatrix(SparseMatrix):
         self.dtype = T.dtype
         self.shape = (T.shape[0], T.shape[1])
         self.ndim = 2
-        T = T.tocoo()        
 
+        T = T.tocoo()        
         if slice is not None:
             ((ib,ie), (jb,je)) = slice
             T = coo_range(T, (ib, ie), (jb, je))
@@ -611,12 +611,12 @@ class SparseTiledMatrix(SparseMatrix):
         y = torch.zeros((H, x.shape[1])).type(torch.FloatTensor)  # device?        
         for (i,j,k) in self._blocklist:
             (H_clip, W_clip) = (min(H, i*n+n), min(W, j*n+n))
-            y[i*n:H_clip, :] += self._d_blockhash_to_tile[k].ascsr().torchdot(x[j*n:W_clip, :])
+            y[i*n:H_clip, :] += self._d_blockhash_to_tile[k].tocsr().torchdot(x[j*n:W_clip, :])
         return y
                 
     def matmul(self, other):
         """For two Tiled() object T1, T2, compute T1.dot(T2) and save in T1"""
-        assert isinstance(other, SparseTiledMatrix) or isinstance(other, SparseMatrix), "Invalid input - Must be SparseMatrix()"
+        assert isinstance(other, SparseTiledMatrix) or isinstance(other, SparseMatrix) or is_scipy_sparse(other), "Invalid input - Must be SparseMatrix()"
         assert other.shape[0] == self.shape[1], "Non-conformal shape"        
         
         if isinstance(other, SparseMatrix) and not isinstance(other, SparseTiledMatrix):
@@ -645,7 +645,7 @@ class SparseTiledMatrix(SparseMatrix):
             for (ii, j, vo) in other._blocklist:
                 if jj == ii and v is not None and vo is not None:
                     if (v,vo) not in d_product:
-                        d_product[(v,vo)] = self._d_blockhash_to_tile[v].ascsr().clone().matmul(other._d_blockhash_to_tile[vo].ascsc())   # cache
+                        d_product[(v,vo)] = self._d_blockhash_to_tile[v].tocsr().clone().matmul(other._d_blockhash_to_tile[vo].tocsc())   # cache
                         d_product[(v,vo)] = d_product[(v,vo)].tocoo().todense()  # faster add?  why not just make everything dense?
                     if (i,j) not in M_accum:
                         M_accum[(i,j)] = d_product[(v,vo)]
@@ -673,13 +673,22 @@ class SparseTiledMatrix(SparseMatrix):
         self.shape = (self.shape[1], self.shape[0])
         return self
     
-    def tocoo(self):
+    def _tocoo(self, format='coo'):
         """Convert to Scipy COOrdinate sparse matrix, this is an expensive operation that should be used for small matrices only and for testing purposes"""
         ((H,W), n) = (self.shape, self._tilesize)
         d_blockhash_to_coo = {k:v.tocoo() for (k,v) in self._d_blockhash_to_tile.items()}
         d = {(i*n, j*n):d_blockhash_to_coo[k] for (i,j,k) in self._blocklist}
         B = [ [d[(i,j)] if (i,j) in d else None for j in range(0, W, max(n,1))] for i in range(0, H, max(n,1))]
-        return scipy.sparse.bmat(B, format='coo') if len(B)>0 else scipy.sparse.coo_matrix((H,W))
+        return scipy.sparse.bmat(B, format=format) if len(B)>0 else scipy.sparse.coo_matrix((H,W))
+
+    def tocoo(self):
+        return self._tocoo()
+
+    def tocsr(self):
+        return self._tocoo(format='csr')
+
+    def tocsc(self):
+        return self._tocoo(format='csc')
 
     def nnz(self):
         return sum([m.nnz() for m in self._d_blockhash_to_tile.values()])

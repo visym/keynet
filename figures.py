@@ -380,17 +380,17 @@ def print_parameters():
     (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=4, beta=1)    
     print('[figures.print_parameters]:  StochasticKeynet (allconvnet) alpha=4 parameters=%d' % (knet.num_parameters()))
 
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 8, n_processes=2)    
-    print('[figures.print_parameters]:  TiledIdentityKeynet-4 (allconvnet) parameters=%d' % (knet.num_parameters()))    
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 8, n_processes=24)    
+    print('[figures.print_parameters]:  TiledIdentityKeynet-8 (allconvnet) parameters=%d' % (knet.num_parameters()))    
 
-    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, 8, n_processes=2)
-    print('[figures.print_parameters]:  TiledPermutationKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))        
+    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, 8, n_processes=24)
+    print('[figures.print_parameters]:  TiledPermutationKeynet-8 (allconvnet) parameters=%d' % (knet.num_parameters()))        
 
-    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 8, n_processes=2, alpha=2, beta=1)
-    print('[figures.print_parameters]:  TiledStochasticKeynet (allconvnet) alpha=2, beta=1, parameters=%d' % (knet.num_parameters()))        
+    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 8, n_processes=24, alpha=2, beta=1)
+    print('[figures.print_parameters]:  TiledStochasticKeynet-8 (allconvnet) alpha=2, beta=1, parameters=%d' % (knet.num_parameters()))        
 
-    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 8, n_processes=2, alpha=4, beta=1)
-    print('[figures.print_parameters]:  TiledStochasticKeynet (allconvnet) alpha=4, beta=1, parameters=%d' % (knet.num_parameters()))        
+    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 8, n_processes=24, alpha=4, beta=1)
+    print('[figures.print_parameters]:  TiledStochasticKeynet-8 (allconvnet) alpha=4, beta=1, parameters=%d' % (knet.num_parameters()))        
     
 
 if __name__ == '__main__':

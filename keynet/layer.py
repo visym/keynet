@@ -23,7 +23,8 @@ class KeyedLayer(nn.Module):
     def key(self, W, A, Ainv):
         assert (W is None or isinstance(W, keynet.sparse.SparseMatrix)) and (isinstance(A, keynet.sparse.SparseMatrix) or isinstance(Ainv, keynet.sparse.SparseMatrix)), "Invalid input"
         if W is not None and A is not None and A is not None:
-            self.W = A.matmul(W).matmul(Ainv)
+            #self.W = A.matmul(W).matmul(Ainv)
+            self.W = A.matmul(W.tocoo().dot(Ainv.tocoo()))
         elif W is not None and A is not None:
             self.W = A.matmul(W)
         elif W is not None and Ainv is not None:
@@ -79,6 +80,10 @@ class KeyedConv2d(KeyedLayer):
                 w.shape[1] == self.in_channels and
                 w.shape[2] == self.kernel_size and
                 b.shape[0] == self.out_channels), "Invalid input"
+
+
+        return self  # TESTING
+
         W = Ainv.new().from_torch_conv2d(self.inshape, w, b, self.stride)  # parallelized
         return super(KeyedConv2d, self).key(W, A, Ainv)
 
@@ -116,8 +121,14 @@ class KeyedReLU(KeyedLayer):
 class KeyedAvgpool2d(KeyedLayer):
     def __init__(self, inshape, kernel_size, stride):
         super(KeyedAvgpool2d, self).__init__()
+        if isinstance(kernel_size, tuple):
+            assert kernel_size[0] == kernel_size[1]  # square
+            kernel_size = kernel_size[0]
         self.kernel_size = kernel_size
-        self.stride = stride
+        if isinstance(stride, tuple):
+            assert stride[0] == stride[1]
+            stride = stride[0]
+        self.stride = stride 
         self.inshape = inshape
 
     def extra_repr(self):
