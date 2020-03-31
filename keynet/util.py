@@ -10,8 +10,10 @@ import os
 import time
 from vipy.util import groupbyasdict
 from numpy.lib.stride_tricks import as_strided
+import vipy
 
 
+    
 def matrix_blockview(W, inshape, n):
     """Reorder a sparse matrix W such that:  W*x.flatten() == matrix_blockview(W, x.shape, n)*blockview(x,n).flatten()"""
     d = {v:k for (k,v) in enumerate(blockview(np.array(range(0,np.prod(inshape))).reshape(inshape), n).flatten())}
