@@ -344,7 +344,7 @@ def test_keynet_scipy():
     print('[test_keynet_constructor]:  IdentityKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))
     print('[test_keynet_constructor]:  IdentityKeynet (allconvnet) PASSED')
 
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 32*32, n_processes=8)    
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 32, n_processes=8)    
     yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
     assert np.allclose(yh, y, atol=1E-5)
