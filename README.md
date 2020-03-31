@@ -7,7 +7,8 @@ python-3.*
 Required 
 
 ```python
-pip3 install torch torchvision numpy scipy vipy scikit-learn joblib tqdm
+pip3 install torch torchvision numpy scipy vipy scikit-learn joblib tqdm xxhash
+pip3 install -e .
 ```
 
 Optional 

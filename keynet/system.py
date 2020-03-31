@@ -121,7 +121,8 @@ class KeyedModel(object):
         """When publicly releasing the keynet, remove keys (if present)"""
         self._imagekey = None
         self._embeddingkey = None        
-
+        return self
+        
     def num_parameters(self):
         return sum([c.nnz() for (k,c) in self._keynet.named_children() if hasattr(c, 'nnz')])
 
@@ -149,6 +150,11 @@ class KeyedSensor(keynet.layer.KeyedLayer):
         self._im = im
         return self
 
+    def fromimage(self, im):
+        self._im = im
+        self._tensor = im.float().torch().contiguous()
+        return self
+    
     def tensor(self, x=None):
         if x is None:
             return self._tensor
@@ -251,15 +257,23 @@ class KeyPair(object):
                 
         return (_f_keypair, _f_reorder)
 
+    
     def diagonal_tiled_identity_matrix_in_block_order(self, tilesize):
         assert tilesize is not None, "invalid tilesize"
         f_channel_to_block = lambda outshape, A: A.matmul(self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True)))
         f_block_to_channel = lambda outshape, A: A.transpose().matmul(self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True)).transpose())
         return lambda layername, outshape: tuple(f(outshape, A) for (f,A) in zip([f_channel_to_block, f_block_to_channel], sparse_diagonal_tiled_identity_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix)))
+
+
+    def block_diagonal_tiled_permutation_matrix_in_block_order(self, tilesize):
+        assert tilesize is not None, "invalid tilesize"
+        f_channel_to_block = lambda outshape, A: A.matmul(self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True)))
+        f_block_to_channel = lambda outshape, A: A.transpose().matmul(self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True)).transpose())
+        return lambda layername, outshape: tuple(f(outshape, A) for (f,A) in zip([f_channel_to_block, f_block_to_channel], sparse_block_diagonal_tiled_permutation_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix)))
     
     
 def keygen(format, backend, alpha=None, beta=0, tilesize=None, n_processes=1, verbose=False):
-    formats = set(['identity', 'permutation', 'stochastic', 'tiled-identity', 'tiled-identity-blockorder', 'tiled-permutation', 'tiled-stochastic', 'tiled-blockpermutation'])
+    formats = set(['identity', 'permutation', 'stochastic', 'tiled-identity', 'tiled-identity-blockorder', 'tiled-permutation', 'tiled-stochastic', 'tiled-blockpermutation', 'tiled-blockpermutation-blockorder'])
     backends = set(['torch', 'scipy'])
     assert format in formats, "Invalid format '%s' - must be in '%s'" % (format, str(formats))
     assert backend in backends, "Invalid backend '%s' - must be in '%s'" % (backend, str(backends))
@@ -281,6 +295,8 @@ def keygen(format, backend, alpha=None, beta=0, tilesize=None, n_processes=1, ve
         return keypair.block_diagonal_tiled_stochastic_matrix(alpha, beta, tilesize)                
     elif format == 'tiled-blockpermutation':
         return keypair.block_permutation_tiled_identity_matrix(tilesize)
+    elif format == 'tiled-blockpermutation-blockorder':
+        return keypair.block_diagonal_tiled_permutation_matrix_in_block_order(tilesize)
     else:
         raise ValueError("Invalid format '%s' - must be in '%s'" % (format, str(formats)))
 
@@ -327,6 +343,11 @@ def TiledStochasticKeySensor(inshape, tilesize, alpha, beta=0):
 def TiledBlockPermutationKeySensor(inshape, tilesize):
     (f_keypair, f_reorder) = keygen('tiled-blockpermutation', 'scipy', tilesize=tilesize)
     return KeyedSensor(inshape, f_keypair('input', inshape), reorder=f_reorder(inshape))
+
+
+def TiledBlockPermutationBlockOrderKeySensor(inshape, tilesize):
+    f_keypair = keygen('tiled-blockpermutation-blockorder', 'scipy', tilesize=tilesize)
+    return KeyedSensor(inshape, f_keypair('input', inshape))
 
 
 def OpticalFiberBundleKeynet(inshape, net):
