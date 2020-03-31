@@ -733,19 +733,22 @@ def spy(A, mindim=256, showdim=1024, range=None):
         return spy(B, mindim, showdim, range=None)
     
     scale = float(mindim) / min(A.shape)
-    (H, W) = np.ceil(np.array(A.shape)*scale)
     
-    A = A.tocoo()
+    if scale >= 1:
+        return vipy.image.Image(array=np.array(A.todense()), colorspace='float').mat2gray().maxdim(showdim, interp='nearest').jet()
+    else:
+        (H, W) = np.ceil(np.array(A.shape)*scale)
+        A = A.tocoo()
 
-    n = 1.0 / scale    
-    d_blockidx_to_vals = defaultdict(list)
-    for (i,j,v) in zip(A.row, A.col, A.data):
-        d_blockidx_to_vals[ (int(i//n), int(j//n)) ].append(v)
+        n = 1.0 / scale    
+        d_blockidx_to_vals = defaultdict(list)
+        for (i,j,v) in zip(A.row, A.col, A.data):
+            d_blockidx_to_vals[ (int(i//n), int(j//n)) ].append(v)
 
-    A_spy = np.zeros( (int(H)+1, int(W)+1), dtype=np.float32)
-    for ((i,j), v) in d_blockidx_to_vals.items():
-        A_spy[i,j] = np.mean(v)
+        A_spy = np.zeros( (int(H)+1, int(W)+1), dtype=np.float32)
+        for ((i,j), v) in d_blockidx_to_vals.items():
+            A_spy[i,j] = np.mean(v)
 
-    return vipy.image.Image(array=A_spy, colorspace='float').mat2gray().maxdim(showdim, interp='nearest').jet()
+        return vipy.image.Image(array=A_spy, colorspace='float').mat2gray().maxdim(showdim, interp='nearest').jet()
 
 
