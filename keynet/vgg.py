@@ -37,22 +37,25 @@ def vgg16_preprocess(jitter=False, blur_radius=None, blur_prob=1.0):
 
 class VGG16(nn.Module):
     """
-    The VGG16 network
+    The VGG16 network, with average pooling replacing maxpooling
     """
-    def __init__(self, num_classes=2622):
+    def __init__(self, num_classes=2622, avgpool=True):
         super(VGG16, self).__init__()
+
+        pooler = (nn.AvgPool2d((3, 3),(2, 2),(0, 0),ceil_mode=True)  if avgpool else  # (3x3) kernel for FIXME in keynet.sparse
+                  nn.MaxPool2d((2, 2),(2, 2),(0, 0),ceil_mode=True))
         
         self.conv1_1 = nn.Conv2d(3,64,(3, 3),(1, 1),(1, 1))
         self.relu1_1 = nn.ReLU()        
         self.conv1_2 = nn.Conv2d(64,64,(3, 3),(1, 1),(1, 1))
         self.relu1_2 = nn.ReLU()
-        self.pool1_2 = nn.AvgPool2d((2, 2),(2, 2),(0, 0),ceil_mode=True)  # should be max
+        self.pool1_2 = pooler
         
         self.conv2_1 = nn.Conv2d(64,128,(3, 3),(1, 1),(1, 1))
         self.relu2_1 = nn.ReLU()
         self.conv2_2 = nn.Conv2d(128,128,(3, 3),(1, 1),(1, 1))
         self.relu2_2 = nn.ReLU()
-        self.pool2_2 = nn.AvgPool2d((2, 2),(2, 2),(0, 0),ceil_mode=True)  # should be max
+        self.pool2_2 = pooler
                 
         self.conv3_1 = nn.Conv2d(128,256,(3, 3),(1, 1),(1, 1))
         self.relu3_1 = nn.ReLU()        
@@ -60,7 +63,7 @@ class VGG16(nn.Module):
         self.relu3_2 = nn.ReLU()        
         self.conv3_3 = nn.Conv2d(256,256,(3, 3),(1, 1),(1, 1))
         self.relu3_3 = nn.ReLU()
-        self.pool3_3 = nn.AvgPool2d((2, 2),(2, 2),(0, 0),ceil_mode=True)  # should be max        
+        self.pool3_3 = pooler
         
         self.conv4_1 = nn.Conv2d(256,512,(3, 3),(1, 1),(1, 1))
         self.relu4_1 = nn.ReLU()                
@@ -68,7 +71,7 @@ class VGG16(nn.Module):
         self.relu4_2 = nn.ReLU()                        
         self.conv4_3 = nn.Conv2d(512,512,(3, 3),(1, 1),(1, 1))
         self.relu4_3 = nn.ReLU()
-        self.pool4_3 = nn.AvgPool2d((2, 2),(2, 2),(0, 0),ceil_mode=True)  # should be max                
+        self.pool4_3 = pooler
 
         self.conv5_1 = nn.Conv2d(512,512,(3, 3),(1, 1),(1, 1))
         self.relu5_1 = nn.ReLU()        
@@ -76,7 +79,7 @@ class VGG16(nn.Module):
         self.relu5_2 = nn.ReLU()                
         self.conv5_3 = nn.Conv2d(512,512,(3, 3),(1, 1),(1, 1))
         self.relu5_3 = nn.ReLU()
-        self.pool5_3 = nn.AvgPool2d((2, 2),(2, 2),(0, 0),ceil_mode=True)  # should be max                        
+        self.pool5_3 = pooler
 
         self.fc6 = nn.Linear(25088,4096)
         self.relu6 = nn.ReLU()

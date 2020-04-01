@@ -52,7 +52,6 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1,
             T = scipy.sparse.vstack( (scipy.sparse.hstack( (T, lastcol)), lastrow) )
         return T
         
-
     # Valid shapes
     assert(len(inshape) == 3 and len(f.shape) == 4)  # 3D tensor inshape=(inchannels, height, width), f.shape=(outchannels, kernelheight, kernelwidth, inchannels)
     assert(f.shape[1] == inshape[0])  # equal inchannels
