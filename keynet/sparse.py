@@ -313,7 +313,8 @@ class SparseMatrix(object):
         self._n_processes = n_processes        
         assert A is None or self.is_scipy_sparse(A) or self.is_numpy_dense(A), "Invalid input - %s" % (str(type(A)))
         self.shape = A.shape if A is not None else (0,0)  # shape=(H,W)
-        self._matrix = A.tocsr() if self.is_scipy_sparse(A) else A
+        # self._matrix = A.tocsr() if self.is_scipy_sparse(A) else A
+        self._matrix = A
         self.dtype = A.dtype if A is not None else None
         self.ndim = 2
 
@@ -395,15 +396,15 @@ class SparseMatrix(object):
 
     def dot(self, x_numpy):
         assert self.is_numpy_dense(x_numpy)
-        if self.is_scipy_sparse(self._matrix):
-            self._matrix = self._matrix.tocsr()
-        return scipy.sparse.csr_matrix.dot(self._matrix, np.matrix(x_numpy))
+        #if self.is_scipy_sparse(self._matrix):
+        #    self._matrix = self._matrix.tocsr()
+        return scipy.sparse.coo_matrix.dot(self._matrix, np.matrix(x_numpy))
         
     def torchdot(self, x_torch):
         assert self.is_torch_dense(x_torch)
-        if self.is_scipy_sparse(self._matrix):
-            self._matrix = self._matrix.tocsr()
-        return torch.as_tensor(scipy.sparse.csr_matrix.dot(self._matrix, np.matrix(x_torch.detach().numpy())))
+        #if self.is_scipy_sparse(self._matrix):
+        #    self._matrix = self._matrix.tocsr()
+        return torch.as_tensor(scipy.sparse.coo_matrix.dot(self._matrix, np.matrix(x_torch.detach().numpy())))
 
     def nnz(self):
         return self._matrix.nnz if self.is_scipy_sparse(self._matrix) else self._matrix.size
@@ -531,7 +532,7 @@ class SparseTiledMatrix(SparseMatrix):
                 print('[keynet.SparseTiledMatrix]: from_coomatrix (1) = %s' % str(self))
             n_rows_per_process = max(self.tilesize(), int(self.tilesize() * np.floor((T.shape[0]//(4*self._n_processes)) / self.tilesize())))  # must be multiple of tilesize
             arange = np.arange(0, T.shape[0], n_rows_per_process)
-            T_rows = Parallel(n_jobs=self._n_processes)(delayed(SparseTiledMatrix)(tilesize=tilesize, n_processes=1, coo_matrix=T, slice=((i, min(i + n_rows_per_process, T.shape[0])), (0, T.shape[1]))) for i in (tqdm(arange) if self._verbose else arange))
+            T_rows = Parallel(n_jobs=self._n_processes, max_nbytes=1e6, mmap_mode='r')(delayed(SparseTiledMatrix)(tilesize=tilesize, n_processes=1, coo_matrix=T, slice=((i, min(i + n_rows_per_process, T.shape[0])), (0, T.shape[1]))) for i in (tqdm(arange) if self._verbose else arange))
             self._d_blockhash_to_tile = {k:b for t in T_rows for (k,b) in t._d_blockhash_to_tile.items()}  # unique
             self._blocklist = []
             U = int(n_rows_per_process // self.tilesize())
@@ -553,25 +554,23 @@ class SparseTiledMatrix(SparseMatrix):
             d_blockidx_to_rows_cols_vals_idx[ (i//n, j//n) ].append( k )
 
         # Single process hashing and tiling
-        d = d_blockidx_to_rows_cols_vals_idx
         (B, M, n) = ([], {}, tilesize)  
         int32 = np.power(2,32)-1
-        for (bi, i) in enumerate(range(0, T.shape[0], n)):
-            for (bj, j) in enumerate(range(0, T.shape[1], n)):
-                if (bi, bj) in d and len(d[bi, bj])>0:
-                    #(rows, cols, vals) = zip(*d[bi, bj])
-                    (rows, cols, vals) = (T.row[d[bi, bj]], T.col[d[bi, bj]], T.data[d[bi, bj]])  # copy
-                    (blockrows, blockcols) = (np.array(rows)-i, np.array(cols)-j)
-                    trimshape = (min(H-i, n), min(W-j, n))
-                    if trimshape[0] < n or trimshape[1] < n:
-                        (blockrows, blockcols, vals) = zip(*[(ii,jj,vv) for (ii,jj,vv) in zip(blockrows, blockcols, vals) if ii < trimshape[0] and jj < trimshape[1]])
-                    if len(blockrows) > 0:
-                        #k = hash(tuple(list(trimshape) + sorted([tuple(r) for r in np.vstack( (W*np.array(blockrows)+np.array(blockcols), np.array(vals)) ).tolist()], key=lambda x: x[0])))
-                        #k = hash(trimshape) + np.sum([hash( (i,j,k) ) % int32  for (i,j,k) in zip(blockrows, blockcols, vals)])
-                        k = xxhash.xxh32_intdigest(str(trimshape)) + np.sum([xxhash.xxh32_intdigest(str((i,j,k))) for (i,j,k) in zip(blockrows, blockcols, vals)])
-                        if k not in M:
-                            M[k] = self._block(scipy.sparse.coo_matrix( (vals, (blockrows, blockcols)), shape=trimshape, dtype=np.float32))
-                        B.append( (bi, bj, k) )
+        for ((bi,bj), k) in d_blockidx_to_rows_cols_vals_idx.items():
+            (i,j) = (bi*n, bj*n)
+            (rows, cols, vals) = (T.row[k], T.col[k], T.data[k])  # copy
+            (blockrows, blockcols) = (np.array(rows)-i, np.array(cols)-j)
+            trimshape = (min(H-i, n), min(W-j, n))
+            if trimshape[0] < n or trimshape[1] < n:
+                (blockrows, blockcols, vals) = zip(*[(ii,jj,vv) for (ii,jj,vv) in zip(blockrows, blockcols, vals) if ii < trimshape[0] and jj < trimshape[1]])
+            if len(blockrows) > 0:
+                #h = hash(tuple(list(trimshape) + sorted([tuple(r) for r in np.vstack( (W*np.array(blockrows)+np.array(blockcols), np.array(vals)) ).tolist()], key=lambda x: x[0])))
+                #h = hash(trimshape) + np.sum([hash( (i,j,k) ) % int32  for (i,j,k) in zip(blockrows, blockcols, vals)])
+                h = xxhash.xxh32_intdigest(str(trimshape)) + np.sum([xxhash.xxh32_intdigest(str((i,j,k))) for (i,j,k) in zip(blockrows, blockcols, vals)])
+                if h not in M:
+                    M[h] = self._block(scipy.sparse.coo_matrix( (vals, (blockrows, blockcols)), shape=trimshape))
+                    #M[h] = scipy.sparse.coo_matrix( (vals, (blockrows, blockcols)), shape=trimshape)
+                B.append( (bi, bj, h) )
         self._blocklist = B
         self._d_blockhash_to_tile = M
         return self
@@ -677,8 +676,10 @@ class SparseTiledMatrix(SparseMatrix):
         ((H,W), n) = (self.shape, self._tilesize)
         d_blockhash_to_coo = {k:v.tocoo() for (k,v) in self._d_blockhash_to_tile.items()}
         d = {(i*n, j*n):d_blockhash_to_coo[k] for (i,j,k) in self._blocklist}
-        B = [ [d[(i,j)] if (i,j) in d else None for j in range(0, W, max(n,1))] for i in range(0, H, max(n,1))]
-        return scipy.sparse.bmat(B, format=format) if len(B)>0 else scipy.sparse.coo_matrix((H,W))
+        #B = [ [d[(i,j)] if (i,j) in d else None for j in range(0, W, max(n,1))] for i in range(0, H, max(n,1))]
+        (rows, cols, vals) = zip(*[(i+ii,j+jj,v) for ((ii,jj), b) in d.items() for (i,j,v) in zip(b.row, b.col, b.data)])
+        #return scipy.sparse.bmat(B, format=format) if len(B)>0 else scipy.sparse.coo_matrix((H,W))
+        return scipy.sparse.coo_matrix( (vals, (rows, cols)), shape=(H,W))
 
     def tocoo(self):
         return self._tocoo()

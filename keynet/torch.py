@@ -32,7 +32,7 @@ def netshape(net, inshape):
             if isinstance(layer, nn.Sequential):
                 hooklist = hooklist + _layer_visitor(f_forward, layer)
             else:
-                assert not hasattr(layer, '__name')  # inplace layers?
+                assert not hasattr(layer, '__name')  # inplace layers?  shared layers?
                 layer.__name = name
                 hooklist.append(layer.register_forward_hook(f_forward))
         return hooklist

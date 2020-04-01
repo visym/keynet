@@ -6,7 +6,7 @@ import keynet.torch
 import keynet.sparse
 from keynet.torch import homogenize, dehomogenize
 from keynet.torch import homogenize_matrix, scipy_coo_to_torch_sparse
-from keynet.sparse import is_scipy_sparse, sparse_toeplitz_avgpool2d
+from keynet.sparse import is_scipy_sparse, sparse_toeplitz_avgpool2d, sparse_toeplitz_conv2d
 import vipy
 
 
@@ -21,7 +21,9 @@ class KeyedLayer(nn.Module):
         return self.W.torchdot(x_affine.t()).t()
         
     def key(self, W, A, Ainv):
-        assert (W is None or isinstance(W, keynet.sparse.SparseMatrix)) and (isinstance(A, keynet.sparse.SparseMatrix) or isinstance(Ainv, keynet.sparse.SparseMatrix)), "Invalid input"
+        assert W is None or isinstance(W, keynet.sparse.SparseMatrix) or is_scipy_sparse(W) 
+        assert A is None or isinstance(A, keynet.sparse.SparseMatrix) or is_scipy_sparse(A)
+        assert Ainv is None or isinstance(Ainv, keynet.sparse.SparseMatrix) or is_scipy_sparse(Ainv)
         if W is not None and A is not None and A is not None:
             #self.W = A.matmul(W).matmul(Ainv)
             self.W = A.matmul(W.tocoo().dot(Ainv.tocoo()))
@@ -81,10 +83,8 @@ class KeyedConv2d(KeyedLayer):
                 w.shape[2] == self.kernel_size and
                 b.shape[0] == self.out_channels), "Invalid input"
 
-
-        return self  # TESTING
-
-        W = Ainv.new().from_torch_conv2d(self.inshape, w, b, self.stride)  # parallelized
+        #W = Ainv.new().from_torch_conv2d(self.inshape, w, b, self.stride)  # parallelized
+        W = sparse_toeplitz_conv2d(self.inshape, w.detach().numpy(), bias=b.detach().numpy(), stride=self.stride, n_processes=Ainv._n_processes)
         return super(KeyedConv2d, self).key(W, A, Ainv)
 
         
@@ -136,7 +136,8 @@ class KeyedAvgpool2d(KeyedLayer):
         return str('<KeyedAvgpool2d: kernel_size=%s, stride=%s%s>' % (str(self.kernel_size), str(self.stride), str_shape))
     
     def key(self, A, Ainv):
-        W = Ainv.new().from_scipy_sparse(sparse_toeplitz_avgpool2d(self.inshape, (self.inshape[0], self.inshape[0], self.kernel_size, self.kernel_size), self.stride))  # Expensive
+        #W = Ainv.new().from_scipy_sparse(sparse_toeplitz_avgpool2d(self.inshape, (self.inshape[0], self.inshape[0], self.kernel_size, self.kernel_size), self.stride))  # Expensive
+        W = sparse_toeplitz_avgpool2d(self.inshape, (self.inshape[0], self.inshape[0], self.kernel_size, self.kernel_size), self.stride)
         return super(KeyedAvgpool2d, self).key(W, A, Ainv)
 
 
