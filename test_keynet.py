@@ -32,6 +32,15 @@ def test_identity_keynet():
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet]:  IdentityKeynet PASSED')
 
+def test_tiled_keynet():
+    inshape = (1,28,28)
+    x = torch.randn(1, *inshape)
+    net = keynet.mnist.LeNet_AvgPool()
+
+    (sensor, knet) = keynet.system.Keynet(inshape, net, backend='scipy-tiled', blocksize=4)
+    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    print('[test_keynet]:  tiled IdentityKeynet PASSED')
+    
 
 def test_permutation_keynet():
     inshape = (1,28,28)
@@ -41,10 +50,19 @@ def test_permutation_keynet():
 
     (sensor, knet) = keynet.system.PermutationKeynet(inshape, net)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    print('[test_keynet]:  global PermutationKeynet  -  PASSED')    
+    
+    (sensor, knet) = keynet.system.Keynet(inshape, net, global_geometric='permutation', memoryorder='block', blocksize=1)
+    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5) 
+    print('[test_keynet]:  local PermutationKeynet  -  PASSED')
+    
+    (sensor, knet) = keynet.system.Keynet(inshape, net, local_geometric='permutation', blocksize=1)  # FIXME: blocksize
+    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+   
     print('[test_keynet]:  PermutationKeynet  -  PASSED')
 
 
-def test_gain_keynet():
+def test_photometric_keynet():
     inshape = (1,28,28)
     x = torch.randn(1, *inshape)
     net = keynet.mnist.LeNet_AvgPool()
@@ -53,17 +71,14 @@ def test_gain_keynet():
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet]:  Analog Gain Keynet  -  PASSED')
 
-
-def test_bias_keynet():
-    inshape = (1,28,28)
-    x = torch.randn(1, *inshape)
-    net = keynet.mnist.LeNet_AvgPool()
-
     (sensor, knet) = keynet.system.Keynet(inshape, net, global_photometric='uniform_bias', beta=1.0)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet]:  Analog Bias Keynet  -  PASSED')
-    
-    
+
+    (sensor, knet) = keynet.system.Keynet(inshape, net, global_photometric='uniform_affine', beta=1.0)
+    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    print('[test_keynet]:  Analog Affine Keynet  -  PASSED')
+        
 
 def test_keynet_scipy():
     inshape = (1,28,28)
@@ -225,10 +240,11 @@ def test_vgg16_stochastic():
 
 
 if __name__ == '__main__':
-    test_identity_keynet()
+    #test_identity_keynet()
+    test_tiled_keynet()
     test_permutation_keynet()
-    test_gain_keynet()    
-    test_bias_keynet()
+    test_photometric_keynet()
+
     
     #test_keynet_scipy()    
     

@@ -7,6 +7,7 @@ from torch import nn
 import torch.nn.functional as F
 import keynet.sparse
 from keynet.sparse import sparse_permutation_matrix, sparse_identity_matrix, sparse_identity_matrix_like
+from keynet.sparse import sparse_uniform_random_diagonal_matrix, diagonal_affine_to_linear
 from keynet.torch import affine_to_linear, linear_to_affine, affine_to_linear_matrix
 from keynet.sparse import sparse_toeplitz_conv2d, sparse_toeplitz_avgpool2d
 from keynet.util import torch_avgpool2d_in_scipy, torch_conv2d_in_scipy
@@ -21,6 +22,17 @@ import vipy
 from vipy.util import Stopwatch
 
 
+def test_diagonal_affine_to_linear():
+    n = 2048
+    A = sparse_uniform_random_diagonal_matrix(n, 1.0)
+    (P, Pinv) = diagonal_affine_to_linear(A, withinverse=True)
+    assert np.allclose(np.eye(n+1), P.dot(Pinv).todense(), atol=1E-5)
+    
+    (P, Pinv) = diagonal_affine_to_linear(A, bias=np.random.rand(n,1), withinverse=True)
+    assert np.allclose(np.eye(n+1), P.dot(Pinv).todense(), atol=1E-5)    
+
+    print('[test_diagonal_affine_to_linear]:  PASSED')
+    
 
 def test_torch_homogenize():
     (N,C,U,V) = (2,2,3,3)
@@ -308,6 +320,7 @@ def test_sparse_matrix():
 
 
 if __name__ == '__main__':
+    test_diagonal_affine_to_linear()
     test_torch_homogenize()
     test_sparse_toeplitz_conv2d()
     test_sparse_toeplitz_avgpool2d()

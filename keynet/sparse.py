@@ -19,24 +19,24 @@ from keynet.util import blockview
 import keynet.globals
 
 
-def sparse_affine_to_linear(A, bias=None):
+def sparse_affine_to_linear(A, bias=None, dtype=np.float32):
     """Convert affine function Ax+b to linear function Mx such that M = [A b; 0 1]"""
     assert is_scipy_sparse(A)    
     if bias is not None:
         assert bias.shape[0] == A.shape[0] and bias.shape[1] == 1
         lastcol = scipy.sparse.coo_matrix(bias)
     else:
-        lastcol = scipy.sparse.coo_matrix((A.shape[0], 1), dtype=np.float32 )
-    lastrow = scipy.sparse.coo_matrix( ([1], ([0], [A.shape[1]])), shape=(1, A.shape[1]+1), dtype=np.float32)
+        lastcol = scipy.sparse.coo_matrix((A.shape[0], 1), dtype=dtype )
+    lastrow = scipy.sparse.coo_matrix( ([1], ([0], [A.shape[1]])), shape=(1, A.shape[1]+1), dtype=dtype)
     return scipy.sparse.vstack( (scipy.sparse.hstack( (A, lastcol)), lastrow) )
 
 
-def diagonal_affine_to_linear(A, bias=None, withinverse=False):
+def diagonal_affine_to_linear(A, bias=None, withinverse=False, dtype=np.float32):
     assert is_scipy_sparse(A)
     assert A.shape[0] == A.shape[1]
     n = A.shape[0] + 1
     
-    L = sparse_affine_to_linear(A, bias=bias)
+    L = sparse_affine_to_linear(A, bias=bias, dtype=np.float64)
     if withinverse:
         # Woodbury matrix inversion lemma (rank one update)
         # (A + uv^T)^{-1} = A^{-1} - \frac{ A^{-1}uv^TA^{-1} }{ 1 + v^T A^{-1} u }
@@ -49,9 +49,9 @@ def diagonal_affine_to_linear(A, bias=None, withinverse=False):
             Linv = Ainv - ((Ainv.dot(u).dot(v.dot(Ainv)))/float(1+(v.dot(Ainv).dot(u).todense())))
         else:
             Linv = scipy.sparse.spdiags(1.0 / L.diagonal(), 0, n, n).tocoo()
-        return (L, Linv)
+        return (L.astype(dtype), Linv.astype(dtype))
     else:
-        return L
+        return L.astype(dtype)
     
 
 def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1, _row=None):
@@ -255,8 +255,8 @@ def sparse_gaussian_random_diagonal_matrix(n, mu=1, sigma=1, eps=1E-6, withinver
 
 def sparse_uniform_random_diagonal_matrix(n, scale=1, eps=1E-6, dtype=np.float32, withinverse=False):
     """nxn diagonal matrix with diagonal entries sampled from scale*[0,1]+eps"""
-    D = scipy.sparse.diags(np.array(scale*np.random.rand(n) + eps).astype(dtype))
-    return (D, scipy.sparse.diags(1.0 / D.diagonal())) if withinverse else D
+    D = scipy.sparse.diags(np.array(scale*np.random.rand(n) + eps))
+    return (D.astype(dtype), scipy.sparse.diags(1.0 / D.diagonal()).astype(dtype)) if withinverse else D.astype(dtype)
 
 
 def sparse_random_doubly_stochastic_matrix(n, k):

@@ -44,7 +44,7 @@ class KeyedLayer(nn.Module):
         return self
 
     def astype(self, f=None):
-        self.W = f(self.W) if f is not None else keynet.sparse.SparseMatrix(self.W)   # scipy to custom SparseMatrix() 
+        self.W = f(self.W) if f is not None else keynet.sparse.SparseMatrix(self.W)   # scipy to custom SparseMatrix()
         return self
     
     def nnz(self):

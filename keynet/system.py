@@ -176,7 +176,7 @@ class KeyedSensor(keynet.layer.KeyedLayer):
     
     def isencrypted(self):
         """An encrypted image is converted from NxCxHxW tensor to Nx(C*H*W+1)"""
-        return self.isloaded() and self._tensor.ndim == 2
+        return self.isloaded() and self._tensor.ndim == 2 and self._tensor.shape == (1, np.prod(self._inshape)+1)
 
     def isloaded(self):
         return self._tensor is not None
@@ -214,7 +214,7 @@ class OpticalFiberBundle(KeyedSensor):
         return self._im
     
 
-def astype(backend='scipy'):
+def astype(backend='scipy', tilesize=None):
     allowable_backend = ['torch', 'scipy']
     
     if backend == 'scipy':
@@ -222,9 +222,11 @@ def astype(backend='scipy'):
     elif backend == 'torch':
         return lambda A: keynet.torch.SparseMatrix(A)
     elif backend == 'scipy-tiled':
-        return lambda A: keynet.sparse.SparseTiledMatrix(A)
+        assert tilesize is not None
+        return lambda A: keynet.sparse.SparseTiledMatrix(coo_matrix=A, tilesize=tilesize)
     elif backend == 'torch-tiled':
-        return lambda A: keynet.torch.SparseTiledMatrix(A)
+        assert tilesize is not None        
+        return lambda A: keynet.torch.SparseTiledMatrix(coo_matrix=A, tilesize=tilesize)
     else:
         raise ValueError('invalid backend "%s"' % backend)
 
@@ -289,11 +291,11 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         (P, Pinv) = (sparse_affine_to_linear(P), sparse_affine_to_linear(Pinv))
     elif global_photometric == 'uniform_bias':
         assert beta is not None and beta > 0
-        (P, Pinv) = diagonal_affine_to_linear(sparse_identity_matrix(N), beta*np.random.rand(N,1).astype(np.float32), withinverse=True)
+        (P, Pinv) = diagonal_affine_to_linear(sparse_identity_matrix(N), beta*np.random.rand(N,1), withinverse=True)
     elif global_photometric == 'uniform_affine':
         assert beta is not None and beta > 0
         P = sparse_uniform_random_diagonal_matrix(N, beta)
-        (P, Pinv) = diagonal_affine_to_linear(P, beta*np.random.rand(N,1).astype(np.float32), withinverse=True)
+        (P, Pinv) = diagonal_affine_to_linear(P, beta*np.random.rand(N,1), withinverse=True)
     else:
         raise ValueError("Invalid global photometric transform '%s' - must be in '%s'" % (global_photometric, str(allowable_global_photometric)))                
 
@@ -309,7 +311,7 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         assert blocksize is not None and N % blocksize == 0 and shape[1] % blocksize == 0 and shape[2] % blocksize == 0
         assert beta is not None and beta > 0        
         p = sparse_uniform_random_diagonal_matrix(blocksize, beta)
-        (p, pinv) = diagonal_affine_to_linear(sparse_block_diagonal(p, (N,N)), bias=np.repeat(beta*np.random.rand(blocksize,1).astype(np.float32), N // blocksize), withinverse=True)
+        (p, pinv) = diagonal_affine_to_linear(sparse_block_diagonal(p, (N,N)), bias=np.repeat(beta*np.random.rand(blocksize,1), N // blocksize), withinverse=True)
     else:
         raise ValueError("Invalid local photometric transform '%s' - must be in '%s'" % (local_photometric, str(allowable_local_photometric)))                
     
@@ -322,10 +324,10 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
 def Keynet(inshape, net=None, backend='scipy', global_photometric='identity', local_photometric='identity', global_geometric='identity', local_geometric='identity', memoryorder='channel',
            do_output_encryption=False, alpha=None, beta=None, blockshape=None, permute_at_level=None, blocksize=None):
     
-    f_backend = astype(backend)
+    f_backend = astype(backend, blocksize)
     f_keypair = lambda layername, shape:  keygen(shape, 
-                                                 global_photometric=global_photometric,
-                                                 local_photometric=local_photometric, 
+                                                 global_photometric=global_photometric if 'relu' not in layername or global_photometric == 'identity' else 'identity',
+                                                 local_photometric=local_photometric if 'relu' not in layername or global_photometric == 'identity' else 'identity',
                                                  global_geometric=global_geometric if 'relu' not in layername or global_geometric == 'identity' else 'permutation',
                                                  local_geometric=local_geometric if 'relu' not in layername or local_geometric == 'identity' else 'permutation',
                                                  memoryorder=memoryorder,                                                                                                  
