@@ -327,7 +327,7 @@ def Keynet(inshape, net=None, backend='scipy', global_photometric='identity', lo
     f_backend = astype(backend, blocksize)
     f_keypair = lambda layername, shape:  keygen(shape, 
                                                  global_photometric=global_photometric if 'relu' not in layername or global_photometric == 'identity' else 'identity',
-                                                 local_photometric=local_photometric if 'relu' not in layername or global_photometric == 'identity' else 'identity',
+                                                 local_photometric=local_photometric if 'relu' not in layername or local_photometric == 'identity' else 'identity',
                                                  global_geometric=global_geometric if 'relu' not in layername or global_geometric == 'identity' else 'permutation',
                                                  local_geometric=local_geometric if 'relu' not in layername or local_geometric == 'identity' else 'permutation',
                                                  memoryorder=memoryorder,                                                                                                  

@@ -16,7 +16,7 @@ class KeyedLayer(nn.Module):
     def __init__(self, W=None):
         super(KeyedLayer, self).__init__()        
         self.W = W if W is not None else None
-
+        
     def forward(self, x_affine):
         assert self.W is not None, "Layer not keyed"
         assert isinstance(self.W, keynet.sparse.SparseMatrix), "Layer not keyed"
@@ -45,7 +45,7 @@ class KeyedLayer(nn.Module):
 
     def astype(self, f=None):
         self.W = f(self.W) if f is not None else keynet.sparse.SparseMatrix(self.W)   # scipy to custom SparseMatrix()
-        return self
+        return self 
     
     def nnz(self):
         assert self.W is not None, "Layer not keyed"

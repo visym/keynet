@@ -43,6 +43,8 @@ def test_tiled_keynet():
     print('[test_keynet]:  tiled IdentityKeynet PASSED')    
     
     (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, tilesize=14)
+    print(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten().tolist())
+    print(net.forward(x).detach().numpy().flatten().tolist())
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)    
     print('[test_keynet]:  tiled PermutationKeynet PASSED')
     
@@ -246,8 +248,8 @@ def test_vgg16_stochastic():
 
 if __name__ == '__main__':
     #test_identity_keynet()
-    #test_tiled_keynet()
-    #test_permutation_keynet()
+    test_tiled_keynet()
+    test_permutation_keynet()
     #test_photometric_keynet()
 
     
@@ -257,4 +259,4 @@ if __name__ == '__main__':
     #test_memory_order()
     #test_keynet_mnist()
     #test_vgg16_permutation()
-    test_vgg16()
+    #test_vgg16()

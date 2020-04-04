@@ -595,11 +595,11 @@ class SparseTiledMatrix(SparseMatrix):
             (i,j,v) = (int(i), int(j), float(v))  # casting to native python types is MUCH faster
             if i>=ib and i<ie and j>=jb and j<je:
                 (bi, bj) = (i//n, j//n)                 
-                d_blockidx_to_hash[(bi, bj)] += hash( (i-bi*n, j-bj*n, v) )
+                d_blockidx_to_hash[(bi, bj)] += xxhash.xxh32_intdigest( str((i-bi*n, j-bj*n, v)))  
                 trimshape = (min(H-bi*n, n), min(W-bj*n, n))
                 if trimshape != (n, n):
-                    d_blockidx_to_hash[(bi, bj)] += hash(trimshape)
-        
+                    d_blockidx_to_hash[(bi, bj)] += xxhash.xxh32_intdigest(str(trimshape))
+
         d_hash_to_blockidx = dict()
         d_blockidx_to_data = defaultdict(list)
         for (i,j,v) in zip(T.row, T.col, T.data):
@@ -621,6 +621,12 @@ class SparseTiledMatrix(SparseMatrix):
                 self._d_blockhash_to_tile[h] = self._block(scipy.sparse.coo_matrix( (vals, (blockrows, blockcols)), shape=trimshape))                
             self._blocklist.append( (bi, bj, h) )
 
+        if not np.allclose(T.tocoo().todense(), self.tocoo().todense(), atol=1E-5):
+            print(np.argwhere(T.tocoo().todense() != self.tocoo().todense()))
+            T1 = np.array(T.tocoo().todense()).flatten()
+            S1 = np.array(self.tocoo().todense()).flatten()
+            k = np.argwhere(T1 != S1)
+            import pdb; pdb.set_trace()
         return self
     
 
@@ -713,9 +719,7 @@ class SparseTiledMatrix(SparseMatrix):
         ((H,W), n) = (self.shape, self._tilesize)
         d_blockhash_to_coo = {k:v.tocoo() for (k,v) in self._d_blockhash_to_tile.items()}
         d = {(i*n, j*n):d_blockhash_to_coo[k] for (i,j,k) in self._blocklist}
-        #B = [ [d[(i,j)] if (i,j) in d else None for j in range(0, W, max(n,1))] for i in range(0, H, max(n,1))]
-        (rows, cols, vals) = zip(*[(i+ii,j+jj,v) for ((ii,jj), b) in d.items() for (i,j,v) in zip(b.row, b.col, b.data)])
-        #return scipy.sparse.bmat(B, format=format) if len(B)>0 else scipy.sparse.coo_matrix((H,W))
+        (rows, cols, vals) = zip(*[(int(i)+ii, int(j)+jj, float(v)) for ((ii,jj), b) in d.items() for (i,j,v) in zip(b.row, b.col, b.data)])
         return scipy.sparse.coo_matrix( (vals, (rows, cols)), shape=(H,W))
 
     def tocoo(self):
