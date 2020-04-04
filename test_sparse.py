@@ -174,7 +174,7 @@ def test_sparse_tiled_matrix():
     assert np.allclose(W1.dot(W2).flatten(), T1.matmul(T2).tocoo().todense().flatten(), atol=1E-5)
 
     T3 = keynet.sparse.SparseTiledMatrix(coo_matrix=T1.tocoo(), tilesize=3)
-    assert len(T3.tiles()) == 3
+    assert len(T3.tiles()) == 2
 
     T2 = keynet.sparse.SparseTiledMatrix(coo_matrix=W2_right.astype(np.float32), tilesize=3)
     T1 = keynet.sparse.SparseTiledMatrix(shape=(T2.shape), tilediag=np.random.rand(3,3).astype(np.float32))

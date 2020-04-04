@@ -346,6 +346,10 @@ def PermutationKeynet(inshape, net):
     return Keynet(inshape, net, global_geometric='permutation')
 
 
+def TiledIdentityKeynet(inshape, net, tilesize):
+    return Keynet(inshape, net, backend='scipy-tiled', blocksize=tilesize)
+
+
 def TiledPermutationKeynet(inshape, net, tilesize):
     return Keynet(inshape, net, global_geometric='permutation', backend='scipy-tiled', blocksize=tilesize)
 
