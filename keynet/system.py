@@ -16,7 +16,7 @@ from keynet.blockpermute import hierarchical_block_permutation_matrix
 import keynet.layer
 import keynet.fiberbundle
 from keynet.util import blockview
-from keynet.globals import GLOBAL
+from keynet.globals import verbose
 
 
 class KeyedModel(object):
@@ -39,7 +39,7 @@ class KeyedModel(object):
         layernames = set([k for (k,m) in net.named_children()])        
         d_name_to_keyedmodule = OrderedDict()        
         for (k,m) in net.named_children():
-            if GLOBAL['VERBOSE']:
+            if verbose():
                 print('[keynet.layers.KeyNet]: Keying "%s"' % k)
             assert k in layerkey, 'Key not found for layer "%s"' % k
             assert k in netshape, 'Layer name not found in net shape for layer "%s"' % k
