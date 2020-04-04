@@ -307,15 +307,6 @@ def test_sparse_matrix():
     print('[test_sparse_matrix]: PASSED')
 
 
-def test_memory_order():
-    inshape = (3,32,32)
-    net = keynet.cifar10.AllConvNet()    
-    net.load_state_dict(torch.load('./models/cifar10_allconv.pth', map_location=torch.device('cpu')));
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 4, order='block')    
-    print(vipy.util.save((sensor, knet), 'keynet_allconv_tiled_blockorder.pkl'))
-    return
-    
-
 if __name__ == '__main__':
     test_torch_homogenize()
     test_sparse_toeplitz_conv2d()

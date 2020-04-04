@@ -30,7 +30,7 @@ def test_identity_keynet():
 
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
-    print('[test_keynet_constructor]:  IdentityKeynet PASSED')
+    print('[test_keynet]:  IdentityKeynet PASSED')
 
 
 def test_permutation_keynet():
@@ -41,7 +41,27 @@ def test_permutation_keynet():
 
     (sensor, knet) = keynet.system.PermutationKeynet(inshape, net)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
-    print('[test_keynet_constructor]:  PermutationKeynet PASSED')
+    print('[test_keynet]:  PermutationKeynet  -  PASSED')
+
+
+def test_gain_keynet():
+    inshape = (1,28,28)
+    x = torch.randn(1, *inshape)
+    net = keynet.mnist.LeNet_AvgPool()
+
+    (sensor, knet) = keynet.system.Keynet(inshape, net, global_photometric='uniform_gain', beta=1.0)
+    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    print('[test_keynet]:  Analog Gain Keynet  -  PASSED')
+
+
+def test_bias_keynet():
+    inshape = (1,28,28)
+    x = torch.randn(1, *inshape)
+    net = keynet.mnist.LeNet_AvgPool()
+
+    (sensor, knet) = keynet.system.Keynet(inshape, net, global_photometric='uniform_bias', beta=1.0)
+    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    print('[test_keynet]:  Analog Bias Keynet  -  PASSED')
     
     
 
@@ -205,15 +225,11 @@ def test_vgg16_stochastic():
 
 
 if __name__ == '__main__':
-    #test_identity_keynet()
-    #test_permutation_keynet()
+    test_identity_keynet()
+    test_permutation_keynet()
+    test_gain_keynet()    
+    test_bias_keynet()
     
-    #test_torch_homogenize()
-    #test_sparse_toeplitz_conv2d()
-    #test_sparse_toeplitz_avgpool2d()
-    #test_blockview()
-    #test_sparse_matrix()
-    test_sparse_tiled_matrix()        
     #test_keynet_scipy()    
     
     #test_vgg16_stochastic()
