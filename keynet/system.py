@@ -6,25 +6,21 @@ import scipy.sparse
 import torch.sparse
 import vipy
 from collections import OrderedDict
-from keynet.torch import homogenize, dehomogenize
 from vipy.util import try_import
-from keynet.torch import homogenize_matrix, scipy_coo_to_torch_sparse
-from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse, sparse_identity_matrix
-from keynet.sparse import sparse_stochastic_matrix_with_inverse, sparse_generalized_stochastic_matrix_with_inverse, sparse_generalized_permutation_matrix_with_inverse, sparse_identity_matrix_like
-from keynet.sparse import sparse_block_diagonal_tiled_permutation_matrix_with_inverse, sparse_diagonal_tiled_identity_matrix_with_inverse
-from keynet.sparse import sparse_block_diagonal_tiled_generalized_permutation_matrix_with_inverse
-from keynet.sparse import sparse_block_diagonal_tiled_generalized_stochastic_matrix_with_inverse
-from keynet.sparse import sparse_block_permutation_tiled_identity_matrix_with_inverse, sparse_channelorder_to_blockorder
 import keynet.torch
+import keynet.sparse
+from keynet.sparse import sparse_permutation_matrix, sparse_identity_matrix, sparse_identity_matrix_like, diagonal_affine_to_linear
+from keynet.sparse import sparse_uniform_random_diagonal_matrix, sparse_gaussian_random_diagonal_matrix
+from keynet.sparse import sparse_channelorder_to_blockorder, sparse_affine_to_linear, sparse_block_diagonal, sparse_orthogonal_block_diagonal
+from keynet.blockpermute import hierarchical_block_permutation_matrix
 import keynet.layer
 import keynet.fiberbundle
 from keynet.util import blockview
-import keynet.sparse
-import keynet.torch
+from keynet.globals import GLOBAL
 
 
 class KeyedModel(object):
-    def __init__(self, net, inshape, inkey, f_layername_to_keypair, do_output_encryption=False, verbose=False):
+    def __init__(self, net, inshape, inkey, f_layername_to_keypair, f_astype=None, do_output_encryption=False):
         # Assign layerkeys using provided lambda function
         net.eval()
         netshape = keynet.torch.netshape(net, inshape)
@@ -43,7 +39,7 @@ class KeyedModel(object):
         layernames = set([k for (k,m) in net.named_children()])        
         d_name_to_keyedmodule = OrderedDict()        
         for (k,m) in net.named_children():
-            if verbose:
+            if GLOBAL['VERBOSE']:
                 print('[keynet.layers.KeyNet]: Keying "%s"' % k)
             assert k in layerkey, 'Key not found for layer "%s"' % k
             assert k in netshape, 'Layer name not found in net shape for layer "%s"' % k
@@ -59,21 +55,21 @@ class KeyedModel(object):
                                                    kernel_size=m.kernel_size,
                                                    stride=m.stride)
                 d_name_to_keyedmodule[k] = m_keyed
-                if '%s_bn' % k not in layernames:                
-                    d_name_to_keyedmodule[k] = d_name_to_keyedmodule[k].key(m.weight, m.bias, layerkey[k]['A'], layerkey[k]['Ainv'])
+                if '%s_bn' % k not in layernames:
+                    d_name_to_keyedmodule[k] = d_name_to_keyedmodule[k].tosparse(m.weight, m.bias).encrypt(layerkey[k]['A'], layerkey[k]['Ainv']).astype(f_astype)
             elif isinstance(m, nn.AvgPool2d):
                 m_keyed = keynet.layer.KeyedAvgpool2d(inshape=netshape[k]['inshape'],
                                                       kernel_size=m.kernel_size,
                                                       stride=m.stride)
-                d_name_to_keyedmodule[k] = m_keyed.key(layerkey[k]['A'], layerkey[k]['Ainv'])  
+                d_name_to_keyedmodule[k] = m_keyed.tosparse().encrypt(layerkey[k]['A'], layerkey[k]['Ainv']).astype(f_astype)
             elif isinstance(m, nn.ReLU):
                 m_keyed = keynet.layer.KeyedReLU()
-                d_name_to_keyedmodule[k] = m_keyed.key(layerkey[k]['A'], layerkey[k]['Ainv'])                                
+                d_name_to_keyedmodule[k] = m_keyed.encrypt(layerkey[k]['A'], layerkey[k]['Ainv']).astype(f_astype)
             elif isinstance(m, nn.Linear):                
                 m_keyed = keynet.layer.KeyedLinear(out_features=m.out_features,
                                                    in_features=m.in_features)
                 if '%s_bn' % k not in layernames:                                
-                    d_name_to_keyedmodule[k] = m_keyed.key(m.weight, m.bias, layerkey[k]['A'], layerkey[k]['Ainv'])   
+                    d_name_to_keyedmodule[k] = m_keyed.tosparse(m.weight, m.bias).encrypt(layerkey[k]['A'], layerkey[k]['Ainv']).astype(f_astype)
             elif isinstance(m, nn.BatchNorm2d):
                 assert ('_' in k) and hasattr(net, k.split('_')[0]), "Batchnorm layers must be named 'mylayername_bn' for corresponding linear layer mylayername.  (e.g. 'conv3_bn')"
                 k_prev = k.split('_')[0]
@@ -83,7 +79,7 @@ class KeyedModel(object):
                                                                        m.running_mean, m.running_var, 1E-5,
                                                                        m.weight, m.bias)
                 # Replace module k_prev with fused weights
-                d_name_to_keyedmodule[k_prev].key(bn_weight, bn_bias, layerkey[k_prev]['A'], layerkey[k_prev]['Ainv'])
+                d_name_to_keyedmodule[k_prev].tosparse(bn_weight, bn_bias).encrypt(layerkey[k_prev]['A'], layerkey[k_prev]['Ainv']).astype(f_astype)
             elif isinstance(m, nn.Dropout):
                 pass  # identity matrix at test time, ignore me
             else:
@@ -93,6 +89,7 @@ class KeyedModel(object):
         self._embeddingkey = layerkey['output']
         self._imagekey = layerkey['input']
         self._layernames = layernames
+        self._outshape = netshape[netshape['output']]['outshape']
         
     def __getattr__(self, attr):
         try:
@@ -103,7 +100,7 @@ class KeyedModel(object):
     def forward(self, img_cipher, outkey=None):
         outkey = outkey if outkey is not None else self.embeddingkey()
         y_cipher = self._keynet.forward(img_cipher)
-        return dehomogenize(self.decrypt(y_cipher, outkey) if outkey is not None else y_cipher)
+        return keynet.torch.linear_to_affine(self.decrypt(y_cipher, outkey) if outkey is not None else y_cipher, self._outshape)
     
     def decrypt(self, y_cipher, outkey=None): 
         outkey = outkey if outkey is not None else self.embeddingkey()
@@ -131,20 +128,22 @@ class KeyedModel(object):
 
 
 class KeyedSensor(keynet.layer.KeyedLayer):
-    def __init__(self, inshape, keypair, reorder=None):
-        super(KeyedSensor, self).__init__() 
+    def __init__(self, inshape, keypair):
+        assert isinstance(inshape, tuple) and len(inshape) == 3
         (self._encryptkey, self._decryptkey) = keypair
-        self._reorderkey = reorder.transpose() if reorder is not None else None
-        self._inshape = inshape
+        self._encryptkey = keynet.sparse.SparseMatrix(self._encryptkey)
+        self._decryptkey = keynet.sparse.SparseMatrix(self._decryptkey)        
+        super(KeyedSensor, self).__init__(W=self._encryptkey)    
+        self._inshape = (1, *inshape)  # 1xCxHxW
         self._tensor = None
         self._im = None
         
     def __repr__(self):
-        return str('<KeySensor: height=%d, width=%d, channels=%d>' % (self._inshape[1], self._inshape[2], self._inshape[0]))
+        return str('<KeySensor: height=%d, width=%d, channels=%d>' % (self._inshape[2], self._inshape[3], self._inshape[1]))
     
     def load(self, imgfile):
-        im = vipy.image.Image(imgfile).resize(height=self._inshape[1], width=self._inshape[2])
-        if self._inshape[0] == 1:
+        im = vipy.image.Image(imgfile).resize(height=self._inshape[2], width=self._inshape[3])
+        if self._inshape[1] == 1:
             im = im.grey()
         self._tensor = im.float().torch().contiguous()  # HxWxC -> 1xCxHxW
         self._im = im
@@ -155,25 +154,25 @@ class KeyedSensor(keynet.layer.KeyedLayer):
         self._tensor = im.float().torch().contiguous()
         return self
     
-    def tensor(self, x=None):
-        if x is None:
-            return self._tensor
-        else:
+    def fromtensor(self, x):
+        if x is not None:
             self._tensor = x.clone().type(torch.FloatTensor)
-            return self
+        return self
 
+    def tensor(self):
+        return self._tensor
+    
     def image(self):
         x_torch = self._tensor        
         if self.isencrypted():
-            x_torch = x_torch if self._reorderkey is None else self._reorderkey.torchdot(x_torch.t()).t()
-            x_torch = dehomogenize(x_torch).reshape(1, *self._inshape)
+            x_torch = keynet.torch.linear_to_affine(x_torch, self._inshape)
         return self._im.fromtorch(x_torch)  # 1xCxHxW -> HxWxC
 
     def keypair(self):
         return (self._encryptkey, self._decryptkey)
 
     def key(self):
-        return self._decryptkey
+        return self._decryptkey.tocoo()
     
     def isencrypted(self):
         """An encrypted image is converted from NxCxHxW tensor to Nx(C*H*W+1)"""
@@ -184,18 +183,19 @@ class KeyedSensor(keynet.layer.KeyedLayer):
     
     def encrypt(self, x_raw=None):
         """img_tensor is NxCxHxW, return Nx(C*H*W+1) homogenized and encrypted"""
-        self.tensor(x_raw) 
-        assert self.isloaded(), "Load image first"
-        self.W = self._encryptkey    # Used in super().forward()
-        self._tensor = super(KeyedSensor, self).forward(homogenize(self._tensor)) if not self.isencrypted() else self._tensor  
+        assert self.isloaded() or x_raw is not None, "Load image first"
+        self.fromtensor(x_raw)
+        if not self.isencrypted():
+            self._tensor = self.forward(keynet.torch.affine_to_linear(self._tensor))
         return self
         
     def decrypt(self, x_cipher=None):
         """x_cipher is Nx(C*H*W+1) homogenized, convert to NxCxHxW decrypted"""
-        self.tensor(x_cipher)
-        assert self.isloaded(), "Load image first"        
-        self.W = self._decryptkey   # Used in super().forward()               
-        self._tensor = dehomogenize(super(KeyedSensor, self).forward(self._tensor)).reshape(self._tensor.shape[0], *self._inshape) if self.isencrypted() else self._tensor
+        assert self.isloaded() or x_cipher is not None, "Load image first"        
+        self.fromtensor(x_cipher)        
+        if self.isencrypted():
+            x_raw = super(KeyedSensor, self).decrypt(self._decryptkey, self._tensor)
+            self._tensor = keynet.torch.linear_to_affine(x_raw, self._inshape)
         return self
 
     
@@ -214,140 +214,134 @@ class OpticalFiberBundle(KeyedSensor):
         return self._im
     
 
-class KeyPair(object):
-    def __init__(self, backend='scipy', n_processes=1, verbose=False):
-        self._SparseMatrix = lambda *args, **kw: keynet.sparse.SparseMatrix(*args, **kw, n_processes=n_processes) if backend=='scipy' else keynet.torch.SparseMatrix(*args, **kw, n_processes=n_processes)
-        self._SparseTiledMatrix = lambda *args, **kw: keynet.sparse.SparseTiledMatrix(*args, **kw, n_processes=n_processes, verbose=verbose) if backend=='scipy' else keynet.torch.SparseTiledMatrix(*args, **kw, n_processes=n_processes)
-        
-    def identity(self):
-        return lambda layername, outshape: (self._SparseMatrix(sparse_identity_matrix(np.prod(outshape)+1).tocoo()),
-                                            self._SparseMatrix(sparse_identity_matrix(np.prod(outshape)+1).tocoo()))
-    def permutation(self):
-        return lambda layername, outshape: tuple(self._SparseMatrix(m) for m in sparse_permutation_matrix_with_inverse(np.prod(outshape)+1))
-
-    def stochastic(self, alpha, beta):
-        assert alpha is not None and beta is not None, "Invalid (alpha, beta)"
-        return lambda layername, outshape: (tuple(self._SparseMatrix(m) for m in sparse_generalized_stochastic_matrix_with_inverse(np.prod(outshape)+1, alpha, beta)) if 'relu' not in layername else 
-                                            tuple(self._SparseMatrix(m) for m in sparse_generalized_permutation_matrix_with_inverse(np.prod(outshape)+1, beta)))
+def astype(backend='scipy'):
+    allowable_backend = ['torch', 'scipy']
     
-    def diagonal_tiled_identity_matrix(self, tilesize):
-        assert tilesize is not None, "invalid tilesize"
-        return lambda layername, outshape: sparse_diagonal_tiled_identity_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix)
-    
-    def block_diagonal_tiled_permutation_matrix(self, tilesize):
-        assert tilesize is not None, "invalid tilesize"
-        return lambda layername, outshape: sparse_block_diagonal_tiled_permutation_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix)
-
-    def block_diagonal_tiled_stochastic_matrix(self, alpha, beta, tilesize):    
-        assert tilesize is not None, "invalid tilesize"
-        assert alpha is not None and beta is not None, "Invalid (alpha, beta)"
-        return lambda layername, outshape: (sparse_block_diagonal_tiled_generalized_stochastic_matrix_with_inverse(np.prod(outshape)+1, tilesize, alpha, beta, tiler=self._SparseTiledMatrix) if 'relu' not in layername else 
-                                            sparse_block_diagonal_tiled_generalized_permutation_matrix_with_inverse(np.prod(outshape)+1, tilesize, beta, tiler=self._SparseTiledMatrix))
-    
-    def block_permutation_tiled_identity_matrix(self, tilesize): 
-        assert tilesize is not None, "invalid tilesize"
-        
-        def _f_reorder(outshape):
-            return self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True))
-        
-        def _f_keypair(layername, outshape):
-            (A, Ainv) = sparse_block_permutation_tiled_identity_matrix_with_inverse(np.prod(outshape)+1, tilesize*tilesize, tiler=self._SparseTiledMatrix)
-            B_channel_to_block = _f_reorder(outshape)                
-            return (A.matmul(B_channel_to_block), Ainv.transpose().matmul(B_channel_to_block).transpose())
-                
-        return (_f_keypair, _f_reorder)
-
-    
-    def diagonal_tiled_identity_matrix_in_block_order(self, tilesize):
-        assert tilesize is not None, "invalid tilesize"
-        f_channel_to_block = lambda outshape, A: A.matmul(self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True)))
-        f_block_to_channel = lambda outshape, A: A.transpose().matmul(self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True)).transpose())
-        return lambda layername, outshape: tuple(f(outshape, A) for (f,A) in zip([f_channel_to_block, f_block_to_channel], sparse_diagonal_tiled_identity_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix)))
-
-
-    def block_diagonal_tiled_permutation_matrix_in_block_order(self, tilesize):
-        assert tilesize is not None, "invalid tilesize"
-        f_channel_to_block = lambda outshape, A: A.matmul(self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True)))
-        f_block_to_channel = lambda outshape, A: A.transpose().matmul(self._SparseMatrix(sparse_channelorder_to_blockorder(outshape, tilesize, homogenize=True)).transpose())
-        return lambda layername, outshape: tuple(f(outshape, A) for (f,A) in zip([f_channel_to_block, f_block_to_channel], sparse_block_diagonal_tiled_permutation_matrix_with_inverse(np.prod(outshape)+1, tilesize, tiler=self._SparseTiledMatrix)))
-    
-    
-def keygen(format, backend, alpha=None, beta=0, tilesize=None, n_processes=1, verbose=False):
-    formats = set(['identity', 'permutation', 'stochastic', 'tiled-identity', 'tiled-identity-blockorder', 'tiled-permutation', 'tiled-stochastic', 'tiled-blockpermutation', 'tiled-blockpermutation-blockorder'])
-    backends = set(['torch', 'scipy'])
-    assert format in formats, "Invalid format '%s' - must be in '%s'" % (format, str(formats))
-    assert backend in backends, "Invalid backend '%s' - must be in '%s'" % (backend, str(backends))
-
-    keypair = KeyPair(backend, n_processes, verbose=verbose)
-    if format == 'identity':
-        return keypair.identity()
-    elif format == 'permutation':
-        return keypair.permutation()    
-    elif format == 'stochastic':
-        return keypair.stochastic(alpha, beta)
-    elif format == 'tiled-identity':
-        return keypair.diagonal_tiled_identity_matrix(tilesize)
-    elif format == 'tiled-identity-blockorder':
-        return keypair.diagonal_tiled_identity_matrix_in_block_order(tilesize)
-    elif format == 'tiled-permutation':
-        return keypair.block_diagonal_tiled_permutation_matrix(tilesize)            
-    elif format == 'tiled-stochastic':
-        return keypair.block_diagonal_tiled_stochastic_matrix(alpha, beta, tilesize)                
-    elif format == 'tiled-blockpermutation':
-        return keypair.block_permutation_tiled_identity_matrix(tilesize)
-    elif format == 'tiled-blockpermutation-blockorder':
-        return keypair.block_diagonal_tiled_permutation_matrix_in_block_order(tilesize)
+    if backend == 'scipy':
+        return lambda A: keynet.sparse.SparseMatrix(A)
+    elif backend == 'torch':
+        return lambda A: keynet.torch.SparseMatrix(A)
+    elif backend == 'scipy-tiled':
+        return lambda A: keynet.sparse.SparseTiledMatrix(A)
+    elif backend == 'torch-tiled':
+        return lambda A: keynet.torch.SparseTiledMatrix(A)
     else:
-        raise ValueError("Invalid format '%s' - must be in '%s'" % (format, str(formats)))
+        raise ValueError('invalid backend "%s"' % backend)
 
+
+def keygen(shape, global_geometric, local_geometric, global_photometric, local_photometric, memoryorder='channel', blocksize=None, alpha=None, beta=None, seed=None, blockshape=None, permute_at_level=None):
+    allowable_memoryorder = set(['channel', 'block'])
+    allowable_global_geometric = set(['identity', 'permutation', 'hierarchical_permutation', 'hierarchical_rotation'])    
+    allowable_local_geometric = set(['identity', 'permutation', 'doubly_stochastic', 'givens_orthonormal'])
+    allowable_global_photometric = set(['identity', 'uniform_gain', 'uniform_affine', 'uniform_bias'])
+    allowable_local_photometric = set(['identity', 'uniform_linear', 'uniform_affine'])    
+
+    (channels, height, width) = shape
+    N = np.prod(shape)
     
-def Keynet(inshape, net, format, backend, do_output_encryption=False, verbose=False, alpha=None, beta=None, tilesize=None, n_processes=1):
-    f_keypair = keygen(format, backend, alpha, beta, tilesize, n_processes=n_processes, verbose=verbose)
+    if seed is not None:
+        np.random.seed(seed)    
+    
+    if memoryorder == 'channel':
+        (C, Cinv) = (sparse_identity_matrix(N), sparse_identity_matrix(N))
+    elif memoryorder == 'block':
+        assert blocksize is not None
+        (C, Cinv) = sparse_channelorder_to_blockorder(shape, blocksize, withinverse=True)
+    else:
+        raise ValueError("Invalid memory order '%s' - must be in '%s'" % (memoryorder, str(allowable_memoryorder)))
+    (C, Cinv) = (sparse_affine_to_linear(C), sparse_affine_to_linear(Cinv))
+    
+    if global_geometric == 'identity':
+        (G, Ginv) = (sparse_identity_matrix(N), sparse_identity_matrix(N))
+    elif global_geometric == 'permutation':
+        (G, Ginv) = sparse_permutation_matrix(N, withinverse=True)
+    elif global_geometric == 'hierarchical_permutation':
+        assert blockshape is not None and permute_at_level is not None
+        (G, Ginv) = hierarchical_block_permutation_matrix((height, width, channels), blockshape, permute_at_level, min_blocksize=8, seed=seed, twist=False, withinverse=True)
+    elif geometric_global == 'hierarchical_rotation':
+        assert blockshape is not None and permute_at_level is not None
+        (G, Ginv) = hierarchical_block_permutation_matrix((height, width, channels), blockshape, permute_at_level, min_blocksize=8, seed=seed, twist=True, withinverse=True)        
+    else:
+        raise ValueError("Invalid global geometric transform '%s' - must be in '%s'" % (global_geometric, str(allowable_global_geometric)))
+    (G, Ginv) = (sparse_affine_to_linear(G), sparse_affine_to_linear(Ginv))
+    
+    if local_geometric == 'identity':
+        (g, ginv) = (sparse_identity_matrix(N), sparse_identity_matrix(N))        
+    elif local_geometric == 'permutation':
+        assert blocksize is not None and N % blocksize == 0 and shape[1] % blocksize == 0 and shape[2] % blocksize == 0
+        (g, ginv) = sparse_orthogonal_block_diagonal(sparse_permutation_matrix(blocksize), shape=(N,N), withinverse=True)
+    elif local_geometric == 'doubly_stochastic':
+        assert blocksize is not None and blocksize < 4096 and alpha is not None
+        (g, ginv) = sparse_random_diagonally_dominant_doubly_stochastic_matrix(blocksize, alpha, withinverse=True)  # expensive inverse
+        (g, ginv)  = (sparse_block_diagonal(g, (N,N)), sparse_block_diagonal(ginv, (N,N)))
+    elif local_geometric == 'givens_orthonormal':
+        assert alpha is not None and alpha < N
+        (g, ginv) = sparse_orthogonal_matrix(N, alpha, balanced=True, withinverse=True)
+    else:
+        raise ValueError("Invalid local geometric transform '%s' - must be in '%s'" % (local_geometric, str(allowable_local_geometric)))        
+    (g, ginv) = (sparse_affine_to_linear(g), sparse_affine_to_linear(ginv))
+    
+    if global_photometric == 'identity':
+        (P, Pinv) = (sparse_affine_to_linear(sparse_identity_matrix(N)), sparse_affine_to_linear(sparse_identity_matrix(N)))
+    elif global_photometric == 'uniform_gain':
+        assert beta is not None and beta > 0
+        (P, Pinv) = sparse_uniform_random_diagonal_matrix(N, beta, withinverse=True)
+        (P, Pinv) = (sparse_affine_to_linear(P), sparse_affine_to_linear(Pinv))
+    elif global_photometric == 'uniform_bias':
+        assert beta is not None and beta > 0
+        (P, Pinv) = diagonal_affine_to_linear(sparse_identity_matrix(N), beta*np.random.rand(N,1).astype(np.float32), withinverse=True)
+    elif global_photometric == 'uniform_affine':
+        assert beta is not None and beta > 0
+        P = sparse_uniform_random_diagonal_matrix(N, beta)
+        (P, Pinv) = diagonal_affine_to_linear(P, beta*np.random.rand(N,1).astype(np.float32), withinverse=True)
+    else:
+        raise ValueError("Invalid global photometric transform '%s' - must be in '%s'" % (global_photometric, str(allowable_global_photometric)))                
+
+    if local_photometric == 'identity':
+        (p, pinv) = (sparse_affine_to_linear(sparse_identity_matrix(N)), sparse_affine_to_linear(sparse_identity_matrix(N)))
+    elif local_photometric == 'uniform_linear':
+        assert blocksize is not None and N % blocksize == 0 and shape[1] % blocksize == 0 and shape[2] % blocksize == 0
+        assert beta is not None and beta > 0        
+        (p, pinv) = sparse_uniform_random_diagonal_matrix(blocksize, beta, withinverse=True)
+        (p, pinv) = (sparse_block_diagonal(P, shape=(N,N)), sparse_block_diagonal(Pinv, shape=(N,N)))
+        (p, pinv) = (sparse_affine_to_linear(p), sparse_affine_to_linear(pinv))
+    elif global_photometric == 'uniform_affine':
+        assert blocksize is not None and N % blocksize == 0 and shape[1] % blocksize == 0 and shape[2] % blocksize == 0
+        assert beta is not None and beta > 0        
+        p = sparse_uniform_random_diagonal_matrix(blocksize, beta)
+        (p, pinv) = diagonal_affine_to_linear(sparse_block_diagonal(p, (N,N)), bias=np.repeat(beta*np.random.rand(blocksize,1).astype(np.float32), N // blocksize), withinverse=True)
+    else:
+        raise ValueError("Invalid local photometric transform '%s' - must be in '%s'" % (local_photometric, str(allowable_local_photometric)))                
+    
+    # Compose!
+    A = p.dot(g.dot(P.dot(G.dot(C))))
+    Ainv = Cinv.dot(Ginv.dot(Pinv.dot(ginv.dot(pinv))))
+    return (A, Ainv)
+
+
+def Keynet(inshape, net=None, backend='scipy', global_photometric='identity', local_photometric='identity', global_geometric='identity', local_geometric='identity', memoryorder='channel',
+           do_output_encryption=False, alpha=None, beta=None, blockshape=None, permute_at_level=None, blocksize=None):
+    
+    f_backend = astype(backend)
+    f_keypair = lambda layername, shape:  keygen(shape, 
+                                                 global_photometric=global_photometric,
+                                                 local_photometric=local_photometric, 
+                                                 global_geometric=global_geometric if 'relu' not in layername or global_geometric == 'identity' else 'permutation',
+                                                 local_geometric=local_geometric if 'relu' not in layername or local_geometric == 'identity' else 'permutation',
+                                                 memoryorder=memoryorder,                                                                                                  
+                                                 blocksize=blocksize, alpha=alpha, beta=beta, blockshape=blockshape, permute_at_level=permute_at_level)
+    
     sensor = KeyedSensor(inshape, f_keypair('input', inshape))
-    model = KeyedModel(net, inshape, sensor.key(), f_keypair, do_output_encryption=do_output_encryption, verbose=verbose)
+    model = KeyedModel(net, inshape, sensor.key(), f_keypair, f_backend, do_output_encryption=do_output_encryption) if net is not None else None
     return (sensor, model)
 
 
-def IdentityKeynet(inshape, net, verbose=True):
-    return Keynet(inshape, net, 'identity', 'scipy', verbose=verbose)
+def IdentityKeynet(inshape, net):
+    return Keynet(inshape, net)
 
 
-def PermutationKeynet(inshape, net, do_output_encryption=False):
-    return Keynet(inshape, net, 'permutation', 'scipy', do_output_encryption)    
-
-
-def StochasticKeynet(inshape, net, alpha, beta=0, do_output_encryption=False):
-    return Keynet(inshape, net, 'stochastic', 'scipy', do_output_encryption, alpha=alpha, beta=beta)    
-
-
-def TiledIdentityKeynet(inshape, net, tilesize, n_processes=1, verbose=False, order='channel'):
-    if order == 'channel':
-        return Keynet(inshape, net, 'tiled-identity', 'scipy', do_output_encryption=False, tilesize=tilesize, n_processes=n_processes, verbose=verbose)
-    else:
-        return Keynet(inshape, net, 'tiled-identity-blockorder', 'scipy', do_output_encryption=False, tilesize=tilesize, n_processes=n_processes, verbose=verbose)
-    
-
-def TiledPermutationKeynet(inshape, net, tilesize, do_output_encryption=False, n_processes=1):
-    return Keynet(inshape, net, 'tiled-permutation', 'scipy', do_output_encryption, tilesize=tilesize, n_processes=n_processes)
-
-
-def TiledStochasticKeynet(inshape, net, tilesize, alpha, beta=0, do_output_encryption=False, n_processes=1, verbose=False):
-    return Keynet(inshape, net, 'tiled-stochastic', 'scipy', do_output_encryption, tilesize=tilesize, alpha=alpha, beta=beta, n_processes=n_processes, verbose=verbose)
-
-
-def TiledStochasticKeySensor(inshape, tilesize, alpha, beta=0):
-    f_keypair = keygen('tiled-stochastic', 'scipy', alpha, beta, tilesize)
-    return KeyedSensor(inshape, f_keypair('input', inshape))
-
-
-def TiledBlockPermutationKeySensor(inshape, tilesize):
-    (f_keypair, f_reorder) = keygen('tiled-blockpermutation', 'scipy', tilesize=tilesize)
-    return KeyedSensor(inshape, f_keypair('input', inshape), reorder=f_reorder(inshape))
-
-
-def TiledBlockPermutationBlockOrderKeySensor(inshape, tilesize):
-    f_keypair = keygen('tiled-blockpermutation-blockorder', 'scipy', tilesize=tilesize)
-    return KeyedSensor(inshape, f_keypair('input', inshape))
+def PermutationKeynet(inshape, net):
+    return Keynet(inshape, net, global_geometric='permutation')
 
 
 def OpticalFiberBundleKeynet(inshape, net):

@@ -6,15 +6,9 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import keynet.sparse
-from keynet.sparse import sparse_permutation_matrix_with_inverse, sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse, sparse_identity_matrix
-from keynet.sparse import sparse_stochastic_matrix_with_inverse, sparse_generalized_stochastic_matrix_with_inverse, sparse_generalized_permutation_matrix_with_inverse, sparse_identity_matrix_like
-from keynet.sparse import sparse_block_diagonal_tiled_permutation_matrix_with_inverse, sparse_diagonal_tiled_identity_matrix_with_inverse
-from keynet.sparse import sparse_block_diagonal_tiled_generalized_permutation_matrix_with_inverse
-from keynet.sparse import sparse_block_diagonal_tiled_generalized_stochastic_matrix_with_inverse
-from keynet.sparse import sparse_block_permutation_tiled_identity_matrix_with_inverse, sparse_channelorder_to_blockorder
-from keynet.torch import homogenize, dehomogenize, homogenize_matrix
-from keynet.sparse import sparse_toeplitz_conv2d
-from keynet.sparse import sparse_toeplitz_avgpool2d
+from keynet.sparse import sparse_permutation_matrix, sparse_identity_matrix, sparse_identity_matrix_like
+from keynet.torch import affine_to_linear, linear_to_affine, affine_to_linear_matrix
+from keynet.sparse import sparse_toeplitz_conv2d, sparse_toeplitz_avgpool2d
 from keynet.util import torch_avgpool2d_in_scipy, torch_conv2d_in_scipy
 from keynet.dense import uniform_random_diagonal_matrix, random_positive_definite_matrix
 import keynet.util
@@ -22,25 +16,48 @@ import keynet.mnist
 import keynet.cifar10
 import keynet.torch
 import keynet.fiberbundle
-import vipy
-from vipy.util import Stopwatch
 import keynet.system
 import keynet.vgg
+import vipy
+from vipy.util import Stopwatch
+from keynet.globals import GLOBAL
 
 
+def test_identity_keynet():
+    inshape = (1,28,28)
+    x = torch.randn(1, *inshape)
+    net = keynet.mnist.LeNet_AvgPool()
+    net.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'))
+
+    (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)
+    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    print('[test_keynet_constructor]:  IdentityKeynet PASSED')
+
+
+def test_permutation_keynet():
+    inshape = (1,28,28)
+    x = torch.randn(1, *inshape)
+    net = keynet.mnist.LeNet_AvgPool()
+    net.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'))
+
+    (sensor, knet) = keynet.system.PermutationKeynet(inshape, net)
+    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    print('[test_keynet_constructor]:  PermutationKeynet PASSED')
+    
+    
 def test_torch_homogenize():
     (N,C,U,V) = (2,2,3,3)
     x = torch.tensor(np.random.rand( N,C,U,V ).astype(np.float32))    
 
-    x_affine = homogenize(x)
-    x_deaffine = dehomogenize(x_affine).reshape( N,C,U,V )
+    x_affine = keynet.torch.affine_to_linear(x)
+    x_deaffine = keynet.torch.linear_to_affine(x_affine, (N,C,U,V))
     assert(np.allclose(x, x_deaffine))
     print('[test_torch_homogenize]:  Affine augmentation (round-trip)  PASSED')    
     
     W = torch.rand(C*U*V, C*U*V)
     b = torch.rand(C*U*V)
-    Wh = homogenize_matrix(W,b)
-    assert np.allclose(dehomogenize(torch.matmul(homogenize(x), Wh)).numpy(), (torch.matmul(x.view(N,-1), W.t())+b).numpy())
+    Wh = affine_to_linear_matrix(W, b)
+    assert np.allclose(keynet.torch.linear_to_affine(torch.matmul(keynet.torch.affine_to_linear(x), Wh)).numpy(), (torch.matmul(x.view(N,-1), W.t())+b).numpy())
     print('[test_torch_homogenize]:  Affine augmentation matrix   PASSED')        
 
     
@@ -114,6 +131,9 @@ def show_sparse_blockkey(n=32):
 
 
 def test_sparse_tiled_matrix():
+    keynet.globals.verbose(False)
+    keynet.globals.num_processes(2)
+    
     (U,V) = (8,8)
     W = sparse_toeplitz_conv2d( (1,U,V), np.random.rand(1,1,3,3) )    
     T = keynet.sparse.SparseTiledMatrix(coo_matrix=W, tilesize=4)
@@ -121,14 +141,14 @@ def test_sparse_tiled_matrix():
 
     (U,V) = (8,8)
     W = sparse_toeplitz_conv2d( (1,U,V), np.random.rand(1,1,3,3) )    
-    T = keynet.sparse.SparseTiledMatrix(coo_matrix=W, tilesize=4, n_processes=2)
+    T = keynet.sparse.SparseTiledMatrix(coo_matrix=W, tilesize=4)
     assert np.allclose(W.todense().astype(np.float32), T.tocoo().todense(), atol=1E-5)
     
     (U,V) = (17,32)
     im = vipy.image.Image('./demo/owl.jpg').resize(U,V).grey()
     img = im.tonumpy()
     x = torch.tensor(img.reshape(1,U,V))
-    x_torch = homogenize(x)
+    x_torch = keynet.torch.affine_to_linear(x)
     x_numpy = x_torch.numpy()
     W_right = sparse_toeplitz_conv2d( (1,U,V), np.random.rand(1,1,3,3) )
     W_right_dense = W_right.todense()    
@@ -166,7 +186,7 @@ def test_sparse_tiled_matrix():
     assert np.allclose(W1.dot(W2).flatten(), T1.matmul(T2).tocoo().todense().flatten(), atol=1E-5)
 
     T3 = keynet.sparse.SparseTiledMatrix(coo_matrix=T1.tocoo(), tilesize=3)
-    assert len(T3.tiles()) == 2  
+    assert len(T3.tiles()) == 3
 
     T2 = keynet.sparse.SparseTiledMatrix(coo_matrix=W2_right.astype(np.float32), tilesize=3)
     T1 = keynet.sparse.SparseTiledMatrix(shape=(T2.shape), tilediag=np.random.rand(3,3).astype(np.float32))
@@ -186,7 +206,7 @@ def show_channelorder_to_blockorder():
     img = im.array()
     img = np.expand_dims(img, 0)  # HxWxC -> 1xCxHxW
     img = np.expand_dims(img, 0)  # HxWxC -> 1xCxHxW    
-    x_torch = homogenize(torch.as_tensor(img))
+    x_torch = keynet.torch.affine_to_linear(torch.as_tensor(img))
     x_numpy = np.array(x_torch).reshape(32*32+1, 1)
     
     (A,Ainv) = sparse_block_permutation_identity_tiled_matrix_with_inverse(np.prod((1,32,32))+1, 16*16)
@@ -196,7 +216,7 @@ def show_channelorder_to_blockorder():
 
     y_numpy = C.transpose().dot(A.dot(C.dot(x_numpy)))
     y_torch = torch.as_tensor(y_numpy).reshape(1, 32*32+1)
-    y = np.array(dehomogenize(y_torch))
+    y = np.array(keynet.torch.linear_to_affine(y_torch))
     
     return vipy.image.Image(array=y.reshape(32,32), colorspace='float').resize(256,256,interp='nearest').show()
     #return vipy.image.Image(array=np.array(A.tocoo().todense()), colorspace='float').show()
@@ -215,7 +235,7 @@ def test_sparse_toeplitz_conv2d():
     T = sparse_toeplitz_conv2d( (C,U,V), f, b, as_correlation=True, stride=stride)
     yh = T.dot(np.hstack((img.reshape(N,C*U*V), np.ones( (N,1) ))).transpose()).transpose()[:,:-1] 
     yh = yh.reshape(N,M,U//stride,V//stride)
-    T_multiproc = sparse_toeplitz_conv2d( (C,U,V), f, b, as_correlation=True, stride=stride, n_processes=2)
+    T_multiproc = sparse_toeplitz_conv2d( (C,U,V), f, b, as_correlation=True, stride=stride)
     assert np.allclose(T.todense().flatten(), T_multiproc.todense().flatten(), atol=1E-5)
     
     # Spatial convolution:  torch replicated in scipy
@@ -320,7 +340,7 @@ def test_keynet_scipy():
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet_constructor]:  StochasticKeynet (alpha=2) PASSED')    
     
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 27, n_processes=2)
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 27)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     knet.num_parameters()
     print('[test_keynet_constructor]:  TiledIdentityKeynet PASSED')
@@ -344,7 +364,8 @@ def test_keynet_scipy():
     print('[test_keynet_constructor]:  IdentityKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))
     print('[test_keynet_constructor]:  IdentityKeynet (allconvnet) PASSED')
 
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 32, n_processes=8)    
+    GLOBAL['PROCESSES'] = 8
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 32)    
     yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
     assert np.allclose(yh, y, atol=1E-5)
@@ -396,14 +417,14 @@ def test_keynet_mnist():
 
     # IdentityTiled keynet
     inshape = (1,28,28)
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, tilesize=32, n_processes=8)    
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, tilesize=32)    
     yh_identity = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
     assert(np.allclose(np.array(y[0]), yh_identity))
     print('[test_keynet_mnist]:  TiledIdentityKeynet: passed')
     print('[test_keynet_mnist]:  TiledIdentityKey parameters: %d' % knet.num_parameters())
     
     # Permutation KeyLeNet
-    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, tilesize=32, n_processes=8)    
+    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, tilesize=32)    
     yh = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
     assert(np.allclose(np.array(y[0]), yh))
     print('[test_keynet_mnist]:  TiledPermutationKeynet: passed')
@@ -417,7 +438,7 @@ def test_keynet_mnist():
     print('[test_keynet_mnist]:  StochasticKeynet parameters: %d' % knet.num_parameters())
 
     # Stochastic Tiled
-    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, alpha=2, beta=2, tilesize=32, n_processes=8)    
+    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, alpha=2, beta=2, tilesize=32)    
     yh = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
     assert(np.allclose(np.array(y[0]), yh))
     print('[test_keynet_mnist]:  TiledStochasticKeynet: passed')
@@ -457,45 +478,51 @@ def test_memory_order():
     inshape = (3,32,32)
     net = keynet.cifar10.AllConvNet()    
     net.load_state_dict(torch.load('./models/cifar10_allconv.pth', map_location=torch.device('cpu')));
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 4, n_processes=24, order='block')    
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 4, order='block')    
     print(vipy.util.save((sensor, knet), 'keynet_allconv_tiled_blockorder.pkl'))
     return
 
 
 def test_vgg16():
+    keynet.globals.num_processes(48)
     net = keynet.vgg.VGG16()
     print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
-    (sensor, model) = keynet.system.TiledIdentityKeynet( (3, 224, 224), net, 32, n_processes=48)
+    (sensor, model) = keynet.system.TiledIdentityKeynet( (3, 224, 224), net, 32)
     print('vgg16: keynet num parameters=%d' % model.num_parameters())
     return 
 
 
 def test_vgg16_permutation():
+    keynet.globals.num_processes(48)    
     net = keynet.vgg.VGG16()
     print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
-    (sensor, model) = keynet.system.TiledPermutationKeynet( (3, 224, 224), net, 32, n_processes=48)
+    (sensor, model) = keynet.system.TiledPermutationKeynet( (3, 224, 224), net, 32)
     print('vgg16: keynet num parameters=%d' % model.num_parameters())
     print(vipy.util.save((sensor, model), 'keynet_vgg16_tiled_permutation.pkl'))
 
 
 def test_vgg16_stochastic():
+    keynet.globals.num_processes(48)    
     net = keynet.vgg.VGG16()
     print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
-    (sensor, model) = keynet.system.TiledStochasticKeynet( (3, 224, 224), net, 32, n_processes=48, alpha=2, beta=1.0, verbose=True)
+    (sensor, model) = keynet.system.TiledStochasticKeynet( (3, 224, 224), net, 32, alpha=2, beta=1.0)
     print('vgg16: keynet num parameters=%d' % model.num_parameters())
     print(vipy.util.save((sensor, model), 'keynet_vgg16_tiled_stochastic_alpha%d_tile%d.pkl' % (2, 32)))
 
 
 if __name__ == '__main__':
-    test_torch_homogenize()
-    test_sparse_toeplitz_conv2d()
-    test_sparse_toeplitz_avgpool2d()
-    test_blockview()
-    test_sparse_matrix()
+    #test_identity_keynet()
+    #test_permutation_keynet()
+    
+    #test_torch_homogenize()
+    #test_sparse_toeplitz_conv2d()
+    #test_sparse_toeplitz_avgpool2d()
+    #test_blockview()
+    #test_sparse_matrix()
     test_sparse_tiled_matrix()        
     #test_keynet_scipy()    
     
-    test_vgg16_stochastic()
+    #test_vgg16_stochastic()
     #test_memory_order()
     #test_keynet_mnist()
     #test_vgg16_permutation()

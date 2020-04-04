@@ -57,28 +57,30 @@ def netshape(net, inshape):
     return d_modulename_to_shape
 
 
-def homogenize(x):
+def affine_to_linear(x):
     """Convert NxCxHxW tensor to Nx(C*H*W+1) tensor where last column is one"""
     (N,C,H,W) = x.shape if len(x.shape)==4 else (1,*x.shape)
     return torch.cat( (x.view(N,C*H*W), torch.ones(N,1, dtype=x.dtype)), dim=1)
 
 
-def dehomogenize(x):
-    """Convert Nx(K+1) tensor to NxK by removing last column"""
-    return torch.narrow(x, 1, 0, x.shape[1]-1)
+def linear_to_affine(x, outshape=None):
+    """Convert Nx(K+1) tensor to NxK by removing last column (which must be one), and reshaping NxK -> NxCxHxW==outshape"""
+    assert len(x.shape) == 2
+    assert np.all(x[:,-1].detach().numpy() == 1)
+    x_affine = torch.narrow(x, 1, 0, x.shape[1]-1)
+    return x_affine.reshape(outshape) if outshape is not None else x_affine
 
 
-def homogenize_matrix(W, bias=None):
-    """Convert matrix W of size (RxC) to (R+1)x(C+1) and return [W^T 0; b^T 1].  
+def affine_to_linear_matrix(W_affine, bias=None):
+    """Convert affine function (Wx+b)^T to linear function (Mx)^T such that M=[W b; 0 1] 
        For x of size (NxK), then this is equivalent to *left* multiplication
-       homogenize(x).dot(homogenize_matrix(W,b)) === homogenize(x).dot(W.t()) + b.t(). 
     """
-    W_transpose = W.t()
-    (R,C) = W_transpose.shape
+    W_affine_transpose = W_affine.t()
+    (R,C) = W_affine_transpose.shape
     b = torch.zeros(1,C) if bias is None else bias.reshape(1,C)
-    W_affine = torch.cat( (torch.cat( (W_transpose, b), dim=0), torch.zeros(R+1, 1)), dim=1)
-    W_affine[-1,-1] = 1        
-    return W_affine
+    W_linear = torch.cat( (torch.cat( (W_affine_transpose, b), dim=0), torch.zeros(R+1, 1)), dim=1)
+    W_linear[-1,-1] = 1        
+    return W_linear
     
 
 def scipy_coo_to_torch_sparse(coo, device='cpu'):
