@@ -32,14 +32,19 @@ def test_identity_keynet():
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet]:  IdentityKeynet PASSED')
 
+    
 def test_tiled_keynet():
     inshape = (1,28,28)
     x = torch.randn(1, *inshape)
     net = keynet.mnist.LeNet_AvgPool()
 
-    (sensor, knet) = keynet.system.Keynet(inshape, net, backend='scipy-tiled', blocksize=4)
+    (sensor, knet) = keynet.system.Keynet(inshape, net, backend='scipy-tiled', blocksize=28)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
-    print('[test_keynet]:  tiled IdentityKeynet PASSED')
+    print('[test_keynet]:  tiled IdentityKeynet PASSED')    
+    
+    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, tilesize=14)
+    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)    
+    print('[test_keynet]:  tiled PermutationKeynet PASSED')
     
 
 def test_permutation_keynet():
@@ -242,8 +247,8 @@ def test_vgg16_stochastic():
 if __name__ == '__main__':
     #test_identity_keynet()
     test_tiled_keynet()
-    test_permutation_keynet()
-    test_photometric_keynet()
+    #test_permutation_keynet()
+    #test_photometric_keynet()
 
     
     #test_keynet_scipy()    

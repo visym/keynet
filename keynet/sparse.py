@@ -14,7 +14,7 @@ import warnings
 from tqdm import tqdm
 import xxhash
 import vipy
-from vipy.util import groupbyasdict, flatlist
+from vipy.util import groupbyasdict, flatlist, Stopwatch
 from keynet.util import blockview
 import keynet.globals
 
@@ -576,7 +576,7 @@ class SparseTiledMatrix(SparseMatrix):
         self.ndim = 2
 
         T = T.tocoo()
-        
+
         if slice is None and self._n_processes > 1:
             n_rows_per_process = max(self.tilesize(), int(self.tilesize() * np.floor((T.shape[0]//(4*self._n_processes)) / self.tilesize())))  # must be multiple of tilesize
             arange = np.arange(0, T.shape[0], n_rows_per_process)
@@ -592,16 +592,18 @@ class SparseTiledMatrix(SparseMatrix):
         ((ib,ie), (jb,je)) = slice if slice is not None else ((0,H), (0,W))
         d_blockidx_to_hash = defaultdict(int)        
         for (i,j,v) in zip(T.row, T.col, T.data):
+            (i,j,v) = (int(i), int(j), float(v))  # casting to native python types is MUCH faster
             if i>=ib and i<ie and j>=jb and j<je:
-                (bi, bj) = (i//n, j//n)
-                d_blockidx_to_hash[(bi, bj)] += xxhash.xxh32_intdigest(str((i-bi*n, j-bj*n, v)))
-                trimshape = (min(H-i, n), min(W-j, n))
+                (bi, bj) = (i//n, j//n)                 
+                d_blockidx_to_hash[(bi, bj)] += hash( (i-bi*n, j-bj*n, v) )
+                trimshape = (min(H-bi*n, n), min(W-bj*n, n))
                 if trimshape != (n, n):
-                    d_blockidx_to_hash[(bi, bj)] += xxhash.xxh32_intdigest(str(trimshape))
-
+                    d_blockidx_to_hash[(bi, bj)] += hash(trimshape)
+        
         d_hash_to_blockidx = dict()
         d_blockidx_to_data = defaultdict(list)
         for (i,j,v) in zip(T.row, T.col, T.data):
+            (i,j,v) = (int(i), int(j), float(v))  # casting to native python types is MUCH faster            
             if i>=ib and i<ie and j>=jb and j<je:
                 (bi, bj) = (i//n, j//n)
                 h = d_blockidx_to_hash[(bi,bj)]
@@ -609,7 +611,7 @@ class SparseTiledMatrix(SparseMatrix):
                     d_hash_to_blockidx[h] = (bi,bj)  # once
                 if (bi,bj) == d_hash_to_blockidx[h]:
                     d_blockidx_to_data[(bi,bj)].append( (i-bi*n, j-bj*n, v) )  # unique tiles only
-
+                    
         self._d_blockhash_to_tile = dict()
         self._blocklist = []
         for ((bi,bj),h) in d_blockidx_to_hash.items():
