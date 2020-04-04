@@ -218,7 +218,7 @@ def test_keynet_mnist():
 
 
 def test_vgg16():
-    keynet.globals.num_processes(48)
+    #keynet.globals.num_processes(24)
     net = keynet.vgg.VGG16()
     print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
     (sensor, model) = keynet.system.TiledIdentityKeynet( (3, 224, 224), net, 1024)
