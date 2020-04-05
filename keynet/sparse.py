@@ -621,12 +621,6 @@ class SparseTiledMatrix(SparseMatrix):
                 self._d_blockhash_to_tile[h] = self._block(scipy.sparse.coo_matrix( (vals, (blockrows, blockcols)), shape=trimshape))                
             self._blocklist.append( (bi, bj, h) )
 
-        if not np.allclose(T.tocoo().todense(), self.tocoo().todense(), atol=1E-5):
-            print(np.argwhere(T.tocoo().todense() != self.tocoo().todense()))
-            T1 = np.array(T.tocoo().todense()).flatten()
-            S1 = np.array(self.tocoo().todense()).flatten()
-            k = np.argwhere(T1 != S1)
-            import pdb; pdb.set_trace()
         return self
     
 
