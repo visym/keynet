@@ -80,7 +80,7 @@ def test_photometric_keynet():
     print('[test_keynet]:  Analog Bias Keynet  -  PASSED')
 
     (sensor, knet) = keynet.system.Keynet(inshape, net, global_photometric='uniform_affine', beta=1.0, gamma=1.0)
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-4)
     print('[test_keynet]:  Analog Affine Keynet  -  PASSED')
         
 
