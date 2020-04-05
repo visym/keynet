@@ -169,7 +169,8 @@ class KeyedSensor(keynet.layer.KeyedLayer):
         if self.isencrypted():
             x_torch = keynet.torch.linear_to_affine(x_torch, self._inshape)
             print(x_torch.shape)            
-        return self._im.fromtorch(x_torch)  # 1xCxHxW -> HxWxC
+        im = self._im.fromtorch(x_torch).mat2gray()  # 1xCxHxW -> HxWxC
+        return im.rgb() if im.iscolor() else im.lum()  # uint8
 
     def keypair(self):
         return (self._encryptkey, self._decryptkey)
@@ -204,11 +205,12 @@ class KeyedSensor(keynet.layer.KeyedLayer):
     
 class OpticalFiberBundle(KeyedSensor):
     def __init__(self, inshape=(3,512,512), keypair=None):
-        (encryptkey, decryptkey) = keypair if keypair is not None else keygen('identity', 'scipy')('input', inshape)      
+        (encryptkey, decryptkey) = keygen(inshape, global_photometric='identity', local_photometric='identity', global_geometric='identity', local_geometric='identity')
         super(OpticalFiberBundle, self).__init__(inshape, (encryptkey, decryptkey))
     
     def load(self, imgfile):
-        img_color = vipy.image.Image(imgfile).maxdim(max(self._inshape)).centercrop(height=self._inshape[1], width=self._inshape[2]).numpy()
+        (N,C,H,W) = self._inshape
+        img_color = vipy.image.Image(imgfile).maxdim(max(H,W)).centercrop(height=H, width=W).numpy()
         img_sim = keynet.fiberbundle.simulation(img_color, h_xtalk=0.05, v_xtalk=0.05, fiber_core_x=16, fiber_core_y=16, do_camera_noise=True)        
         self._im = vipy.image.Image(array=np.uint8(img_sim), colorspace='rgb')
         return self
@@ -241,7 +243,7 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
     allowable_photometric = set(['identity', 'uniform_random_gain', 'uniform_random_affine', 'uniform_random_bias', 'constant_bias', 'linear_bias'])
 
     (channels, height, width) = shape
-    blocknumel = blocksize*blocksize    
+    blocknumel = blocksize*blocksize if blocksize is not None else None
     N = np.prod(shape)
     
     if seed is not None:
@@ -370,8 +372,8 @@ def IdentityKeynet(inshape, net):
     return Keynet(inshape, net)
 
 
-def PermutationKeynet(inshape, net):
-    return Keynet(inshape, net, global_geometric='permutation')
+def PermutationKeynet(inshape, net, do_output_encryption=False):
+    return Keynet(inshape, net, global_geometric='permutation', do_output_encryption=do_output_encryption)
 
 
 def TiledIdentityKeynet(inshape, net, tilesize):
