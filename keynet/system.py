@@ -161,10 +161,10 @@ class KeyedSensor(keynet.layer.KeyedLayer):
             self._tensor = x.clone().type(torch.FloatTensor)
         return self
 
-    def tensor(self):
+    def astensor(self):
         return self._tensor
     
-    def image(self):
+    def asimage(self):
         x_torch = self._tensor        
         if self.isencrypted():
             x_torch = keynet.torch.linear_to_affine(x_torch, self._inshape)
@@ -296,9 +296,11 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         ginv = keynet.sparse.SparseTiledMatrix(tilediag=ginv, shape=(N,N)).tocoo()
     elif local_geometric == 'givens_orthogonal':
         assert alpha is not None and blocksize is not None
-        (g, ginv) =  sparse_orthogonal_matrix(blocksize_blocksize, int(alpha), balanced=True, withinverse=True) 
-        g = keynet.sparse.SparseTiledMatrix(tilediag=g, shape=(N,N)).tocoo()
-        ginv = keynet.sparse.SparseTiledMatrix(tilediag=ginv, shape=(N,N)).tocoo()
+        (g, ginv) = sparse_orthogonal_matrix(blocknumel, int(alpha), balanced=True, withinverse=True)
+        (A, Ainv) = sparse_permutation_matrix(blocknumel, withinverse=True)
+        (g, ginv) = (A.dot(g), ginv.dot(Ainv))
+        g = keynet.sparse.SparseTiledMatrix(tilediag=g, shape=(N,N)).tocoo().astype(np.float32)
+        ginv = keynet.sparse.SparseTiledMatrix(tilediag=ginv, shape=(N,N)).tocoo().astype(np.float32)
     else:
         raise ValueError("Invalid local geometric transform '%s' - must be in '%s'" % (local_geometric, str(allowable_local_geometric)))        
     (g, ginv) = (sparse_affine_to_linear(g), sparse_affine_to_linear(ginv))
