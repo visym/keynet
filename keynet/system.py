@@ -272,7 +272,7 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         (G, Ginv) = (A.dot(G).dot(Ainv), A.dot(Ginv).dot(Ainv))  # CxHxW -> HxWxC -> hierarchical permute in HxWxC order -> CxHxW
     elif global_geometric == 'givens_orthogonal':
         assert alpha is not None
-        (g, ginv) = sparse_orthogonal_matrix(N, alpha, balanced=True, withinverse=True)        
+        (G, Ginv) = sparse_orthogonal_matrix(N, int(alpha), balanced=True, withinverse=True)        
     else:
         raise ValueError("Invalid global geometric transform '%s' - must be in '%s'" % (global_geometric, str(allowable_global_geometric)))
     (G, Ginv) = (sparse_affine_to_linear(G), sparse_affine_to_linear(Ginv))
@@ -330,7 +330,8 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         assert blocksize is not None 
         assert beta is not None and beta > 0 and gamma is not None and gamma > 0
         p = sparse_uniform_random_diagonal_matrix(blocksize, beta)
-        (p, pinv) = diagonal_affine_to_linear(sparse_block_diagonal(p, shape=(N,N)), bias=np.repeat(gamma*np.random.rand(blocksize,1), N // blocksize), withinverse=True)
+        bias = np.repeat(gamma*np.random.rand(blocksize,1), N // blocksize).reshape(N,1)        
+        (p, pinv) = diagonal_affine_to_linear(sparse_block_diagonal(p, shape=(N,N)), bias=bias, withinverse=True)
     else:
         raise ValueError("Invalid local photometric transform '%s' - must be in '%s'" % (local_photometric, str(allowable_photometric)))                
     

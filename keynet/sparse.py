@@ -19,6 +19,16 @@ from keynet.util import blockview
 import keynet.globals
 
 
+def sparse_HWC_to_CHW_matrix(shape, withinverse=False):
+    img = np.array(range(0, np.prod(shape))).reshape(shape)
+    img_permute = np.moveaxis(img, 2, 0)
+    cols = img_permute.flatten()    
+    rows = range(0, len(cols))
+    vals = np.ones_like(rows)
+    P = scipy.sparse.coo_matrix( (vals, (rows, cols)), shape=(np.prod(img.shape), np.prod(img.shape)), dtype=np.float32)
+    return P if not withinverse else (P, P.transpose())
+
+
 def sparse_affine_to_linear(A, bias=None, dtype=np.float32):
     """Convert affine function Ax+b to linear function Mx such that M = [A b; 0 1]"""
     assert is_scipy_sparse(A)    
