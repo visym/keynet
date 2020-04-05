@@ -60,7 +60,7 @@ def test_permutation_keynet():
     (sensor, knet) = keynet.system.Keynet(inshape, net, global_geometric='permutation', memoryorder='block', blocksize=14)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5) 
     print('[test_keynet]:  global PermutationKeynet  -  PASSED')
-    
+
     (sensor, knet) = keynet.system.Keynet(inshape, net, local_geometric='permutation', blocksize=28*28)  
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)   
     print('[test_keynet]:  local PermutationKeynet  -  PASSED')
@@ -75,11 +75,11 @@ def test_photometric_keynet():
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet]:  Analog Gain Keynet  -  PASSED')
 
-    (sensor, knet) = keynet.system.Keynet(inshape, net, global_photometric='uniform_bias', beta=1.0)
+    (sensor, knet) = keynet.system.Keynet(inshape, net, global_photometric='uniform_bias', gamma=1.0)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet]:  Analog Bias Keynet  -  PASSED')
 
-    (sensor, knet) = keynet.system.Keynet(inshape, net, global_photometric='uniform_affine', beta=1.0)
+    (sensor, knet) = keynet.system.Keynet(inshape, net, global_photometric='uniform_affine', beta=1.0, gamma=1.0)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet]:  Analog Affine Keynet  -  PASSED')
         
@@ -255,4 +255,4 @@ if __name__ == '__main__':
     #test_memory_order()
     #test_keynet_mnist()
     #test_vgg16_permutation()
-    test_vgg16()
+    #test_vgg16()

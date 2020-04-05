@@ -281,7 +281,7 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         (g, ginv) = (sparse_identity_matrix(N), sparse_identity_matrix(N))        
     elif local_geometric == 'permutation':
         assert blocksize is not None
-        g = keynet.sparse.SparseTiledMatrix(tilediag=sparse_permutation_matrix(blocksize), shape=(N,N)).tocoo()
+        g = keynet.sparse.SparseTiledMatrix(tilediag=sparse_permutation_matrix(blocksize), shape=(N,N)).tocoo().astype(np.float32)
         ginv = g.transpose()
     elif local_geometric == 'doubly_stochastic':
         assert blocksize is not None and blocksize < 4096 and alpha is not None

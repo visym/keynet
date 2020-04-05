@@ -151,30 +151,30 @@ def sparse_channelorder_to_blockorder(shape, blockshape, withinverse=True):
     return A if not withinverse else (A, A.transpose())
                                             
     
-def sparse_block_diagonal(mats, shape=None, format='coo'):
+def sparse_block_diagonal(mats, shape=None, format='coo', dtype=np.float32):
     """Create a sparse matrix with elements in mats as blocks on the diagonal, faster than scipy"""
     if isinstance(mats, np.ndarray) or is_scipy_sparse(mats):
         assert shape is not None
         blocksize = mats.shape        
         mats = [mats]
         (U,V) = shape
-        assert U % blocksize[0] == 0 and V % blocksize[1] == 0
     else:
         n = len(mats)
         blocksize = mats[0].shape
-        (U,V) = (n*blocksize[0], n*blocksize[1])
+        (U,V) = (n*blocksize[0], n*blocksize[1]) if shape is None else shape
 
     (rows,cols,data) = ([],[],[])
     for (k, (i,j)) in enumerate(zip(range(0,U,blocksize[0]), range(0,V,blocksize[1]))):
         b = scipy.sparse.coo_matrix(mats[k % len(mats)])
         for ii,jj,v in zip(b.row, b.col, b.data):
-            rows.append(i+ii)
-            cols.append(j+jj)
-            data.append(v)
+            if (i+ii) < U and (j+jj) < V:            
+                rows.append(i+ii)
+                cols.append(j+jj)
+                data.append(v)
     return scipy.sparse.coo_matrix( (data, (rows, cols)), shape=(U, V)).asformat(format)
 
 
-def sparse_orthogonal_block_diagonal(mats, shape=None, format='coo', withinverse=False):
+def sparse_orthogonal_block_diagonal(mats, shape=None, format='coo', withinverse=False, dtype=np.float32):
     """Create a sparse matrix with elements in mats as blocks on the diagonal, faster than scipy.
        Mat is repeated to fill out shape, assume mats are orthogonal, and provide inverse if requested.
        This assumes that the submatrices in mats are orthogonal matrices, but does not check!
@@ -188,11 +188,10 @@ def sparse_orthogonal_block_diagonal(mats, shape=None, format='coo', withinverse
         blocksize = mats.shape        
         mats = [mats]
         (U,V) = shape
-        assert U % blocksize[0] == 0 and V % blocksize[1] == 0        
     else:
         n = len(mats)
         blocksize = mats[0].shape
-        (U,V) = (n*blocksize[0], n*blocksize[1])
+        (U,V) = (n*blocksize[0], n*blocksize[1]) if shape is None else shape
 
     assert blocksize[0] == blocksize[1]
     assert U==V
@@ -201,11 +200,12 @@ def sparse_orthogonal_block_diagonal(mats, shape=None, format='coo', withinverse
     for (k, (i,j)) in enumerate(zip(range(0,U,blocksize[0]), range(0,V,blocksize[1]))):
         b = scipy.sparse.coo_matrix(mats[k % len(mats)])
         for ii,jj,v in zip(b.row, b.col, b.data):
-            rows.append(i+ii)
-            cols.append(j+jj)
-            data.append(v)
+            if (i+ii) < U and (j+jj) < V:
+                rows.append(i+ii)
+                cols.append(j+jj)
+                data.append(v)
     P = scipy.sparse.coo_matrix( (data, (rows, cols)), shape=(U, V)).asformat(format)
-    return P if not withinverse else (P, P.transpose())
+    return P.astype(dtype) if not withinverse else (P.astype(dtype), P.transpose().astype(dtype))
 
 
 def sparse_identity_matrix(n, dtype=np.float32):
@@ -224,7 +224,7 @@ def sparse_permutation_matrix(n, dtype=np.float32, withinverse=False):
     return (P, P.transpose()) if withinverse else P
 
 
-def sparse_orthogonal_matrix(n, k_iter, balanced=True, withinverse=False):
+def sparse_orthogonal_matrix(n, k_iter, balanced=True, withinverse=False, dtype=np.float32):
     """Givens rotations"""
     S = None
     G_index = []
@@ -244,13 +244,13 @@ def sparse_orthogonal_matrix(n, k_iter, balanced=True, withinverse=False):
             G[j,i] = np.sin(theta)
             G[j,j] = np.cos(theta)
         S = G.dot(S) if S is not None else G
-    return S if not withinverse else (S, S.transpose())
+    return S.astype(dtype) if not withinverse else (S.astype(dtype), S.transpose().astype(dtype))
 
 
-def sparse_gaussian_random_diagonal_matrix(n, mu=1, sigma=1, eps=1E-6, withinverse=False):
+def sparse_gaussian_random_diagonal_matrix(n, mu=1, sigma=1, eps=1E-6, withinverse=False, dtype=np.float32):
     """nxn diagonal matrix with diagonal entries sampled from max(N(mu, sigma), eps)"""
-    D = scipy.sparse.diags(np.maximum(eps, np.array(sigma*np.random.randn(n)+mu).astype(np.float32)), dtype=np.float32)
-    return (D, scipy.sparse.diags(1.0 / D.diagonal())) if withinverse else D
+    D = scipy.sparse.diags(np.maximum(eps, np.array(sigma*np.random.randn(n)+mu)))
+    return (D.astype(dtype), scipy.sparse.diags(1.0 / D.diagonal()).astype(dtype))if withinverse else D.astype(dtype)
 
 
 def sparse_uniform_random_diagonal_matrix(n, scale=1, eps=1E-6, dtype=np.float32, withinverse=False):
