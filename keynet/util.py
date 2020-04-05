@@ -25,6 +25,7 @@ def matrix_blockview(W, inshape, n):
 
 def blockview(A, n):
     """View an np.array A of size (H,W) as an array of shape (H//n, W//n, n, n), such that entry blockview(A,n)[0,0] == A[0:n,0:n]"""
+    assert A.ndim == 2
     shape = (A.shape[0]//n, A.shape[1]//n) + (n,n)
     strides = (n*A.strides[0], n*A.strides[1])+ A.strides
     return as_strided(A, shape=shape, strides=strides)

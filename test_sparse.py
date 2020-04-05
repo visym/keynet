@@ -8,10 +8,10 @@ import torch.nn.functional as F
 import keynet.sparse
 from keynet.sparse import sparse_permutation_matrix, sparse_identity_matrix, sparse_identity_matrix_like
 from keynet.sparse import sparse_uniform_random_diagonal_matrix, diagonal_affine_to_linear
-from keynet.torch import affine_to_linear, linear_to_affine, affine_to_linear_matrix
-from keynet.sparse import sparse_toeplitz_conv2d, sparse_toeplitz_avgpool2d
+from keynet.sparse import sparse_toeplitz_conv2d, sparse_toeplitz_avgpool2d, sparse_channelorder_to_blockorder_matrix
 from keynet.util import torch_avgpool2d_in_scipy, torch_conv2d_in_scipy
 from keynet.dense import uniform_random_diagonal_matrix, random_positive_definite_matrix
+from keynet.torch import affine_to_linear, linear_to_affine, affine_to_linear_matrix
 import keynet.util
 import keynet.mnist
 import keynet.cifar10
@@ -214,7 +214,7 @@ def show_channelorder_to_blockorder():
     x_numpy = np.array(x_torch).reshape(32*32+1, 1)
     
     (A,Ainv) = sparse_block_permutation_identity_tiled_matrix_with_inverse(np.prod((1,32,32))+1, 16*16)
-    C = sparse_channelorder_to_blockorder((1,32,32), 16, True)
+    C = sparse_channelorder_to_blockorder_matrix((1,32,32), 16, True)
 
     assert np.allclose(C.dot(C.transpose()).todense(), np.eye(32*32+1))
 

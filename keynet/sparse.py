@@ -19,14 +19,38 @@ from keynet.util import blockview
 import keynet.globals
 
 
-def sparse_HWC_to_CHW_matrix(shape, withinverse=False):
+def sparse_channelorder_to_pixelorder_matrix(shape, withinverse=False):
+    """Return permutation matrix that will convert an image in CxHxW memory layout (channel order) to HxWxC memory layout (pixel order)"""
+    (C,H,W) = shape 
     img = np.array(range(0, np.prod(shape))).reshape(shape)
-    img_permute = np.moveaxis(img, 2, 0)
+    img_permute = np.moveaxis(img, 2, 0)   # CxHxW -> HxWxC
     cols = img_permute.flatten()    
     rows = range(0, len(cols))
     vals = np.ones_like(rows)
     P = scipy.sparse.coo_matrix( (vals, (rows, cols)), shape=(np.prod(img.shape), np.prod(img.shape)), dtype=np.float32)
     return P if not withinverse else (P, P.transpose())
+
+
+def sparse_channelorder_to_blockorder_matrix(shape, blocksize, withinverse=True):
+    """Return permytation matrix that will convert an image in CxHxW channel order to Cx(H//N)x(W//N)xNxN for blocksize=N"""
+    
+    assert isinstance(shape, tuple) and len(shape)==3, "Shape must be (C,H,W) tuple"
+    
+    (C,H,W) = shape
+    if (H*W) % blocksize != 0:
+        warnings.warn('[keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blocksize=%d and shape=%s' % (blocksize, str(shape)))
+
+    (H_pad, W_pad) = (int(blocksize*np.ceil((H)/float(blocksize))), int(blocksize*np.ceil((W)/float(blocksize))))    
+    img_channelorder = np.array(range(0, H_pad*W_pad)).reshape(H_pad,W_pad)  # HxW, img[0:H] == first row 
+    img_blockorder = blockview(img_channelorder, blocksize).flatten()  # (H//B)x(W//B)xBxB, img.flatten()[0:B*B] == first block
+    img_blockorder = img_blockorder[0:H*W]
+    (rows, cols, vals) = ([], [], [])
+    for c in range(0,C):
+        rows.extend(np.array(range(0, H*W)) + c*H*W)
+        cols.extend(img_blockorder + c*H*W)
+        vals.extend(np.ones_like(img_blockorder))
+    A =scipy.sparse.coo_matrix( (vals, (rows, cols)), dtype=np.float32).tocsr()
+    return A if not withinverse else (A, A.transpose())
 
 
 def sparse_affine_to_linear(A, bias=None, dtype=np.float32):
@@ -141,24 +165,6 @@ def sparse_toeplitz_avgpool2d(inshape, filtershape, stride):
     return sparse_toeplitz_conv2d(inshape, F, bias=None, stride=stride)
 
 
-def sparse_channelorder_to_blockorder(shape, blockshape, withinverse=True):
-    assert isinstance(shape, tuple) and len(shape)==3, "Shape must be (C,H,W) tuple"
-    
-    (C,H,W) = shape
-    if (H*W) % blockshape != 0:
-        warnings.warn('[keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blockshape=%d and shape=%s' % (blockshape, str(shape)))
-
-    (H_pad, W_pad) = (int(blockshape*np.ceil((H)/float(blockshape))), int(blockshape*np.ceil((W)/float(blockshape))))    
-    img_channelorder = np.array(range(0, H_pad*W_pad)).reshape(H_pad,W_pad)  # HxW, img[0:H] == first row 
-    img_blockorder = blockview(img_channelorder, blockshape).flatten()  # (H//B)x(W//B)xBxB, img[0:B*B] == first block
-    img_blockorder = img_blockorder[0:H*W]
-    (rows, cols, vals) = ([], [], [])
-    for c in range(0,C):
-        rows.extend(np.array(range(0, H*W)) + c*H*W)
-        cols.extend(img_blockorder + c*H*W)
-        vals.extend(np.ones_like(img_blockorder))
-    A =scipy.sparse.coo_matrix( (vals, (rows, cols)), dtype=np.float32).tocsr()
-    return A if not withinverse else (A, A.transpose())
                                             
     
 def sparse_block_diagonal(mats, shape=None, format='coo', dtype=np.float32):
