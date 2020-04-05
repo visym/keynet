@@ -10,8 +10,9 @@ from vipy.util import try_import
 import keynet.torch
 import keynet.sparse
 from keynet.sparse import sparse_permutation_matrix, sparse_identity_matrix, sparse_identity_matrix_like, diagonal_affine_to_linear
-from keynet.sparse import sparse_uniform_random_diagonal_matrix, sparse_gaussian_random_diagonal_matrix
+from keynet.sparse import sparse_uniform_random_diagonal_matrix, sparse_gaussian_random_diagonal_matrix, sparse_random_diagonally_dominant_doubly_stochastic_matrix
 from keynet.sparse import sparse_channelorder_to_blockorder, sparse_affine_to_linear, sparse_block_diagonal, sparse_orthogonal_block_diagonal
+from keynet.sparse import sparse_orthogonal_matrix
 from keynet.blockpermute import hierarchical_block_permutation_matrix
 import keynet.layer
 import keynet.fiberbundle
@@ -166,6 +167,9 @@ class KeyedSensor(keynet.layer.KeyedLayer):
         x_torch = self._tensor        
         if self.isencrypted():
             x_torch = keynet.torch.linear_to_affine(x_torch, self._inshape)
+            print('test')
+            print(x_torch.shape)
+            
         return self._im.fromtorch(x_torch)  # 1xCxHxW -> HxWxC
 
     def keypair(self):
@@ -231,12 +235,11 @@ def astype(backend='scipy', tilesize=None):
         raise ValueError('invalid backend "%s"' % backend)
 
 
-def keygen(shape, global_geometric, local_geometric, global_photometric, local_photometric, memoryorder='channel', blocksize=None, alpha=None, beta=None, seed=None, blockshape=None, permute_at_level=None):
+def keygen(shape, global_geometric, local_geometric, global_photometric, local_photometric, memoryorder='channel', blocksize=None, alpha=None, beta=None, gamma=None, seed=None, blockshape=None, permute_at_level=None):
     allowable_memoryorder = set(['channel', 'block'])
-    allowable_global_geometric = set(['identity', 'permutation', 'hierarchical_permutation', 'hierarchical_rotation'])    
-    allowable_local_geometric = set(['identity', 'permutation', 'doubly_stochastic', 'givens_orthonormal'])
-    allowable_global_photometric = set(['identity', 'uniform_gain', 'uniform_affine', 'uniform_bias'])
-    allowable_local_photometric = set(['identity', 'uniform_linear', 'uniform_affine'])    
+    allowable_global_geometric = set(['identity', 'permutation', 'hierarchical_permutation', 'hierarchical_rotation', 'givens_orthogonal'])    
+    allowable_local_geometric = set(['identity', 'permutation', 'doubly_stochastic', 'givens_orthogonal'])
+    allowable_photometric = set(['identity', 'uniform_gain', 'uniform_affine', 'uniform_bias'])
 
     (channels, height, width) = shape
     N = np.prod(shape)
@@ -259,10 +262,17 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         (G, Ginv) = sparse_permutation_matrix(N, withinverse=True)
     elif global_geometric == 'hierarchical_permutation':
         assert blockshape is not None and permute_at_level is not None
+        (A, Ainv) = keynet.sparse.sparse_HWC_to_CHW_matrix((height, width, channels), withinverse=True)
         (G, Ginv) = hierarchical_block_permutation_matrix((height, width, channels), blockshape, permute_at_level, min_blocksize=8, seed=seed, twist=False, withinverse=True)
-    elif geometric_global == 'hierarchical_rotation':
+        (G, Ginv) = (A.dot(G).dot(Ainv), A.dot(Ginv).dot(Ainv))  # CxHxW -> HxWxC -> hierarchical permute in HxWxC order -> CxHxW
+    elif global_geometric == 'hierarchical_rotation':
         assert blockshape is not None and permute_at_level is not None
-        (G, Ginv) = hierarchical_block_permutation_matrix((height, width, channels), blockshape, permute_at_level, min_blocksize=8, seed=seed, twist=True, withinverse=True)        
+        (A, Ainv) = keynet.sparse.sparse_HWC_to_CHW_matrix((height, width, channels), withinverse=True)                
+        (G, Ginv) = hierarchical_block_permutation_matrix((height, width, channels), blockshape, permute_at_level, min_blocksize=8, seed=seed, twist=True, withinverse=True)
+        (G, Ginv) = (A.dot(G).dot(Ainv), A.dot(Ginv).dot(Ainv))  # CxHxW -> HxWxC -> hierarchical permute in HxWxC order -> CxHxW
+    elif global_geometric == 'givens_orthogonal':
+        assert alpha is not None
+        (g, ginv) = sparse_orthogonal_matrix(N, alpha, balanced=True, withinverse=True)        
     else:
         raise ValueError("Invalid global geometric transform '%s' - must be in '%s'" % (global_geometric, str(allowable_global_geometric)))
     (G, Ginv) = (sparse_affine_to_linear(G), sparse_affine_to_linear(Ginv))
@@ -270,15 +280,19 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
     if local_geometric == 'identity':
         (g, ginv) = (sparse_identity_matrix(N), sparse_identity_matrix(N))        
     elif local_geometric == 'permutation':
-        assert blocksize is not None and N % blocksize == 0 and shape[1] % blocksize == 0 and shape[2] % blocksize == 0
-        (g, ginv) = sparse_orthogonal_block_diagonal(sparse_permutation_matrix(blocksize), shape=(N,N), withinverse=True)
+        assert blocksize is not None
+        g = keynet.sparse.SparseTiledMatrix(tilediag=sparse_permutation_matrix(blocksize), shape=(N,N)).tocoo()
+        ginv = g.transpose()
     elif local_geometric == 'doubly_stochastic':
         assert blocksize is not None and blocksize < 4096 and alpha is not None
-        (g, ginv) = sparse_random_diagonally_dominant_doubly_stochastic_matrix(blocksize, alpha, withinverse=True)  # expensive inverse
-        (g, ginv)  = (sparse_block_diagonal(g, (N,N)), sparse_block_diagonal(ginv, (N,N)))
-    elif local_geometric == 'givens_orthonormal':
-        assert alpha is not None and alpha < N
-        (g, ginv) = sparse_orthogonal_matrix(N, alpha, balanced=True, withinverse=True)
+        (g, ginv) = sparse_random_diagonally_dominant_doubly_stochastic_matrix(blocksize, int(alpha), withinverse=True)  # expensive inverse
+        g = keynet.sparse.SparseTiledMatrix(tilediag=g, shape=(N,N)).tocoo()
+        ginv = keynet.sparse.SparseTiledMatrix(tilediag=ginv, shape=(N,N)).tocoo()
+    elif local_geometric == 'givens_orthogonal':
+        assert alpha is not None and blocksize is not None
+        (g, ginv) =  sparse_orthogonal_matrix(blocksize, int(alpha), balanced=True, withinverse=True) 
+        g = keynet.sparse.SparseTiledMatrix(tilediag=g, shape=(N,N)).tocoo()
+        ginv = keynet.sparse.SparseTiledMatrix(tilediag=ginv, shape=(N,N)).tocoo()
     else:
         raise ValueError("Invalid local geometric transform '%s' - must be in '%s'" % (local_geometric, str(allowable_local_geometric)))        
     (g, ginv) = (sparse_affine_to_linear(g), sparse_affine_to_linear(ginv))
@@ -290,30 +304,35 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         (P, Pinv) = sparse_uniform_random_diagonal_matrix(N, beta, withinverse=True)
         (P, Pinv) = (sparse_affine_to_linear(P), sparse_affine_to_linear(Pinv))
     elif global_photometric == 'uniform_bias':
-        assert beta is not None and beta > 0
-        (P, Pinv) = diagonal_affine_to_linear(sparse_identity_matrix(N), beta*np.random.rand(N,1), withinverse=True)
+        assert gamma is not None and gamma > 0
+        (P, Pinv) = diagonal_affine_to_linear(sparse_identity_matrix(N), gamma*np.random.rand(N,1), withinverse=True)
     elif global_photometric == 'uniform_affine':
-        assert beta is not None and beta > 0
+        assert beta is not None and beta > 0 and gamma is not None and gamma > 0
         P = sparse_uniform_random_diagonal_matrix(N, beta)
-        (P, Pinv) = diagonal_affine_to_linear(P, beta*np.random.rand(N,1), withinverse=True)
+        (P, Pinv) = diagonal_affine_to_linear(P, gamma*np.random.rand(N,1), withinverse=True)
     else:
-        raise ValueError("Invalid global photometric transform '%s' - must be in '%s'" % (global_photometric, str(allowable_global_photometric)))                
+        raise ValueError("Invalid global photometric transform '%s' - must be in '%s'" % (global_photometric, str(allowable_photometric)))                
 
     if local_photometric == 'identity':
         (p, pinv) = (sparse_affine_to_linear(sparse_identity_matrix(N)), sparse_affine_to_linear(sparse_identity_matrix(N)))
-    elif local_photometric == 'uniform_linear':
-        assert blocksize is not None and N % blocksize == 0 and shape[1] % blocksize == 0 and shape[2] % blocksize == 0
+    elif local_photometric == 'uniform_gain':
+        assert blocksize is not None
         assert beta is not None and beta > 0        
         (p, pinv) = sparse_uniform_random_diagonal_matrix(blocksize, beta, withinverse=True)
         (p, pinv) = (sparse_block_diagonal(P, shape=(N,N)), sparse_block_diagonal(Pinv, shape=(N,N)))
         (p, pinv) = (sparse_affine_to_linear(p), sparse_affine_to_linear(pinv))
-    elif global_photometric == 'uniform_affine':
-        assert blocksize is not None and N % blocksize == 0 and shape[1] % blocksize == 0 and shape[2] % blocksize == 0
-        assert beta is not None and beta > 0        
+    elif local_photometric == 'uniform_bias':
+        assert blocksize is not None 
+        assert gamma is not None and gamma > 0
+        bias = np.repeat(gamma*np.random.rand(blocksize,1), N // blocksize).reshape(N,1)
+        (p, pinv) = diagonal_affine_to_linear(sparse_identity_matrix(N), bias=bias, withinverse=True)        
+    elif local_photometric == 'uniform_affine':
+        assert blocksize is not None 
+        assert beta is not None and beta > 0 and gamma is not None and gamma > 0
         p = sparse_uniform_random_diagonal_matrix(blocksize, beta)
-        (p, pinv) = diagonal_affine_to_linear(sparse_block_diagonal(p, (N,N)), bias=np.repeat(beta*np.random.rand(blocksize,1), N // blocksize), withinverse=True)
+        (p, pinv) = diagonal_affine_to_linear(sparse_block_diagonal(p, shape=(N,N)), bias=np.repeat(gamma*np.random.rand(blocksize,1), N // blocksize), withinverse=True)
     else:
-        raise ValueError("Invalid local photometric transform '%s' - must be in '%s'" % (local_photometric, str(allowable_local_photometric)))                
+        raise ValueError("Invalid local photometric transform '%s' - must be in '%s'" % (local_photometric, str(allowable_photometric)))                
     
     # Compose!
     A = p.dot(g.dot(P.dot(G.dot(C))))
@@ -322,7 +341,7 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
 
 
 def Keynet(inshape, net=None, backend='scipy', global_photometric='identity', local_photometric='identity', global_geometric='identity', local_geometric='identity', memoryorder='channel',
-           do_output_encryption=False, alpha=None, beta=None, blockshape=None, permute_at_level=None, blocksize=None):
+           do_output_encryption=False, alpha=None, beta=None, gamma=None, blockshape=None, permute_at_level=None, blocksize=None):
     
     f_backend = astype(backend, blocksize)
     f_keypair = lambda layername, shape:  keygen(shape, 
@@ -331,7 +350,7 @@ def Keynet(inshape, net=None, backend='scipy', global_photometric='identity', lo
                                                  global_geometric=global_geometric if 'relu' not in layername or global_geometric == 'identity' else 'permutation',
                                                  local_geometric=local_geometric if 'relu' not in layername or local_geometric == 'identity' else 'permutation',
                                                  memoryorder=memoryorder,                                                                                                  
-                                                 blocksize=blocksize, alpha=alpha, beta=beta, blockshape=blockshape, permute_at_level=permute_at_level)
+                                                 blocksize=blocksize, alpha=alpha, beta=beta, gamma=gamma, blockshape=blockshape, permute_at_level=permute_at_level)
     
     sensor = KeyedSensor(inshape, f_keypair('input', inshape))
     model = KeyedModel(net, inshape, sensor.key(), f_keypair, f_backend, do_output_encryption=do_output_encryption) if net is not None else None

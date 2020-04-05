@@ -43,8 +43,6 @@ def test_tiled_keynet():
     print('[test_keynet]:  tiled IdentityKeynet PASSED')    
     
     (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, tilesize=14)
-    print(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten().tolist())
-    print(net.forward(x).detach().numpy().flatten().tolist())
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)    
     print('[test_keynet]:  tiled PermutationKeynet PASSED')
     
@@ -59,14 +57,13 @@ def test_permutation_keynet():
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet]:  global PermutationKeynet  -  PASSED')    
     
-    (sensor, knet) = keynet.system.Keynet(inshape, net, global_geometric='permutation', memoryorder='block', blocksize=1)
+    (sensor, knet) = keynet.system.Keynet(inshape, net, global_geometric='permutation', memoryorder='block', blocksize=14)
     assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5) 
-    print('[test_keynet]:  local PermutationKeynet  -  PASSED')
+    print('[test_keynet]:  global PermutationKeynet  -  PASSED')
     
-    (sensor, knet) = keynet.system.Keynet(inshape, net, local_geometric='permutation', blocksize=1)  # FIXME: blocksize
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
-   
-    print('[test_keynet]:  PermutationKeynet  -  PASSED')
+    (sensor, knet) = keynet.system.Keynet(inshape, net, local_geometric='permutation', blocksize=28*28)  
+    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)   
+    print('[test_keynet]:  local PermutationKeynet  -  PASSED')
 
 
 def test_photometric_keynet():
@@ -250,7 +247,7 @@ if __name__ == '__main__':
     #test_identity_keynet()
     test_tiled_keynet()
     test_permutation_keynet()
-    #test_photometric_keynet()
+    test_photometric_keynet()
 
     
     #test_keynet_scipy()    
