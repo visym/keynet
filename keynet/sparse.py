@@ -17,6 +17,7 @@ import vipy
 from vipy.util import groupbyasdict, flatlist, Stopwatch
 from keynet.util import blockview
 import keynet.globals
+import keynet.joblib
 
 
 def sparse_channelorder_to_pixelorder_matrix(shape, withinverse=False):
@@ -506,7 +507,7 @@ class SparseMatrix(object):
 
 
 class SparseTiledMatrix(SparseMatrix):
-    def __init__(self, tilesize=None, coo_matrix=None, tilediag=None, shape=None, slice=None):
+    def __init__(self, tilesize=None, coo_matrix=None, tilediag=None, shape=None):
         self._n_processes = keynet.globals.num_processes()
         self.dtype = None
         self.shape = (0,0) if shape is None else shape
@@ -516,7 +517,7 @@ class SparseTiledMatrix(SparseMatrix):
         self._blocklist = []
 
         if coo_matrix is not None and tilesize is not None:
-            self.from_coomatrix(coo_matrix, tilesize, slice=slice)
+            self.from_coomatrix(coo_matrix, tilesize)
         elif tilediag is not None and shape is not None:
             self.from_tilediag(shape, tilediag)
         
@@ -575,7 +576,7 @@ class SparseTiledMatrix(SparseMatrix):
         assert self.is_scipy_sparse(A)
         return SparseTiledMatrix(coo_matrix=A.tocoo(), tilesize=self.tilesize())
 
-    def from_coomatrix(self, T, tilesize, slice=None):
+    def from_coomatrix(self, T, tilesize):
         """Given a sparse matrix T, split into non-overlapping nxn blocks or 'tiles' of size self._tilesize x self.Blocksize, and 
            return an indexed representation for unique submatrices which provides memory efficient matrix vector multiplication when T is self-similar.
         
@@ -592,50 +593,32 @@ class SparseTiledMatrix(SparseMatrix):
         self.ndim = 2
 
         T = T.tocoo()
-
-        if slice is None and self._n_processes > 1:
-            n_rows_per_process = max(self.tilesize(), int(self.tilesize() * np.floor((T.shape[0]//(4*self._n_processes)) / self.tilesize())))  # must be multiple of tilesize
-            arange = np.arange(0, T.shape[0], n_rows_per_process)
-            T_rows = Parallel(n_jobs=self._n_processes, max_nbytes=1e6, mmap_mode='r')(delayed(SparseTiledMatrix)(tilesize=tilesize, coo_matrix=T, slice=((i, min(i + n_rows_per_process, T.shape[0])), (0, T.shape[1]))) for i in (tqdm(arange) if keynet.globals.verbose() else arange))
-            self._d_blockhash_to_tile = {k:b for t in T_rows for (k,b) in t._d_blockhash_to_tile.items()}  # unique is overwritten
-            self._blocklist = [b for t in T_rows for b in t._blocklist]  # merge 
-            if keynet.globals.verbose():
-                print('[keynet.SparseTiledMatrix]: from_coomatrix = %s' % str(self))
-            return self
-
         n = tilesize
         (H,W) = self.shape        
-        ((ib,ie), (jb,je)) = slice if slice is not None else ((0,H), (0,W))
-        d_blockidx_to_hash = defaultdict(int)        
-        for (i,j,v) in zip(T.row, T.col, T.data):
-            (i,j,v) = (int(i), int(j), float(v))  # casting to native python types is MUCH faster
-            if i>=ib and i<ie and j>=jb and j<je:
-                (bi, bj) = (i//n, j//n)                 
-                d_blockidx_to_hash[(bi, bj)] += xxhash.xxh32_intdigest( str((i-bi*n, j-bj*n, v)))  
-                trimshape = (min(H-bi*n, n), min(W-bj*n, n))
-                if trimshape != (n, n):
-                    d_blockidx_to_hash[(bi, bj)] += xxhash.xxh32_intdigest(str(trimshape))
 
-        d_hash_to_blockidx = dict()
-        d_blockidx_to_data = defaultdict(list)
+        d_blockidx_to_tile = defaultdict(list)
         for (i,j,v) in zip(T.row, T.col, T.data):
-            (i,j,v) = (int(i), int(j), float(v))  # casting to native python types is MUCH faster            
-            if i>=ib and i<ie and j>=jb and j<je:
-                (bi, bj) = (i//n, j//n)
-                h = d_blockidx_to_hash[(bi,bj)]
-                if h not in d_hash_to_blockidx:
-                    d_hash_to_blockidx[h] = (bi,bj)  # once
-                if (bi,bj) == d_hash_to_blockidx[h]:
-                    d_blockidx_to_data[(bi,bj)].append( (i-bi*n, j-bj*n, v) )  # unique tiles only
-                    
+            (ii,jj,vv) = (int(i), int(j), float(v))  # casting to native python types 
+            (bi,bj) = (ii//n, jj//n)
+            d_blockidx_to_tile[(bi, bj)].append( (ii-bi*n, jj-bj*n, vv) )
+
         self._d_blockhash_to_tile = dict()
         self._blocklist = []
-        for ((bi,bj),h) in d_blockidx_to_hash.items():
-            if (bi,bj) in d_blockidx_to_data:
-                (blockrows, blockcols, vals) = zip(*d_blockidx_to_data[(bi,bj)])
-                trimshape = (min(H-bi*n, n), min(W-bj*n, n))
-                self._d_blockhash_to_tile[h] = self._block(scipy.sparse.coo_matrix( (vals, (blockrows, blockcols)), shape=trimshape))                
+        for ((bi,bj), ijv) in d_blockidx_to_tile.items():
+            h = hash(tuple(ijv))
+            if h not in self._d_blockhash_to_tile:
+                self._d_blockhash_to_tile[h] = ijv
             self._blocklist.append( (bi, bj, h) )
+        
+        # Once we know the sparsity pattern for a single spatial dimension, we can repeat this for all channels
+        # this should avoid having to hash every channel and hash only once to group in the right way
+        # this is also a way to get a fast compressibility
+        # need to bake in the blocksize based on downsampling 
+
+        #for ((bi,bj), ijv) in self._d_blockhash_to_tile.items():
+        #    (row, col, val) = zip(*ijv)
+        #    self._d_blockhash_to_tile[h] = scipy.sparse.coo_matrix( (val, (row, col)), shape=(n,n))
+        # can still have duplicates (sorted tuples) and ragged shapes and block sizes not square
 
         return self
     

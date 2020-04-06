@@ -232,6 +232,8 @@ def astype(backend='scipy', tilesize=None):
     elif backend == 'torch-tiled':
         assert tilesize is not None        
         return lambda A: keynet.torch.SparseTiledMatrix(coo_matrix=A, tilesize=tilesize)
+    elif backend == None:
+        return lambda A: None  # discard for testing
     else:
         raise ValueError('invalid backend "%s"' % backend)
 
@@ -370,8 +372,8 @@ def Keynet(inshape, net=None, backend='scipy', global_photometric='identity', lo
     return (sensor, model)
 
 
-def IdentityKeynet(inshape, net):
-    return Keynet(inshape, net)
+def IdentityKeynet(inshape, net, backend='scipy'):
+    return Keynet(inshape, net, backend=backend)
 
 
 def PermutationKeynet(inshape, net, do_output_encryption=False):
