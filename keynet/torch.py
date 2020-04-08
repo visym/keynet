@@ -125,7 +125,7 @@ def fuse_conv2d_and_bn(conv2d_weight, conv2d_bias, bn_running_mean, bn_running_v
 class SparseMatrix(keynet.sparse.SparseMatrix):
     def __init__(self, A=None, n_processes=1):
         self._n_processes = n_processes        
-        assert self.is_torch_sparse(A) or self.is_torch_dense(A) or self.is_scipy_sparse(A), "Invalid input"
+        assert self.is_torch_sparse(A) or self.is_torch_dense_float32(A) or self.is_scipy_sparse(A), "Invalid input"
         self.shape = A.shape
         self._matrix = A
         self.dtype = A.type if self.is_torch(A) else A.dtype
@@ -136,7 +136,7 @@ class SparseMatrix(keynet.sparse.SparseMatrix):
         return self
     
     def from_torch_dense(self, A):
-        assert self.is_torch_dense(A)
+        assert self.is_torch_dense_float32(A)
         return SparseMatrix(A)
 
     def from_scipy_sparse(self, A):
@@ -155,7 +155,7 @@ class SparseMatrix(keynet.sparse.SparseMatrix):
         return self.torchdot(x)
     
     def torchdot(self, x):
-        assert self.is_torch_dense(x)
+        assert self.is_torch_dense_float32(x)
         if self.is_scipy_sparse(self._matrix):
             self._matrix = scipy_coo_to_torch_sparse(self._matrix.tocoo())  # lazy conversion
         return torch.sparse.mm(self._matrix, x)
@@ -172,10 +172,10 @@ class SparseMatrix(keynet.sparse.SparseMatrix):
         return torch_sparse_to_scipy_coo(self._matrix)
 
     
-class SparseTiledMatrix(keynet.sparse.SparseTiledMatrix):
-    def __init__(self, tilesize=None, coo_matrix=None, blocktoeplitz=None, shape=None, n_processes=1):
-        super(SparseTiledMatrix, self).__init__(tilesize, coo_matrix, blocktoeplitz, shape, n_processes)
-
-    def _block(self, B):
+class TiledMatrix(keynet.sparse.TiledMatrix):
+    def __init__(self, A, tileshape):
+        super(TiledMatrix, self).__init__(A, tileshape)
+        
+    def _tiletype(self, B):
         return keynet.torch.SparseMatrix(scipy_coo_to_torch_sparse(B))
     

@@ -29,7 +29,7 @@ def test_identity_keynet():
     net.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'))
 
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet]:  IdentityKeynet PASSED')
 
     
@@ -38,13 +38,13 @@ def test_tiled_keynet():
     x = torch.randn(1, *inshape)
     net = keynet.mnist.LeNet_AvgPool()
 
-    (sensor, knet) = keynet.system.Keynet(inshape, net, backend='scipy-tiled', blocksize=28)
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    (sensor, knet) = keynet.system.Keynet(inshape, net, backend='scipy', tileshape=(28,28))
+    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet]:  tiled IdentityKeynet PASSED')    
     
-    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, tilesize=14)
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)    
-    print('[test_keynet]:  tiled PermutationKeynet PASSED')
+    #(sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, tileshape=(14,14))
+    #assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)    
+    #print('[test_keynet]:  tiled PermutationKeynet PASSED')
     
 
 def test_permutation_keynet():
@@ -54,16 +54,12 @@ def test_permutation_keynet():
     net.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'))
 
     (sensor, knet) = keynet.system.PermutationKeynet(inshape, net)
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet]:  global PermutationKeynet  -  PASSED')    
     
     (sensor, knet) = keynet.system.Keynet(inshape, net, global_geometric='permutation', memoryorder='block', blocksize=14)
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5) 
+    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5) 
     print('[test_keynet]:  global PermutationKeynet  -  PASSED')
-
-    (sensor, knet) = keynet.system.Keynet(inshape, net, local_geometric='permutation', blocksize=28*28)  
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)   
-    print('[test_keynet]:  local PermutationKeynet  -  PASSED')
 
 
 def test_photometric_keynet():
@@ -71,16 +67,16 @@ def test_photometric_keynet():
     x = torch.randn(1, *inshape)
     net = keynet.mnist.LeNet_AvgPool()
 
-    (sensor, knet) = keynet.system.Keynet(inshape, net, global_photometric='uniform_gain', beta=1.0)
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    (sensor, knet) = keynet.system.Keynet(inshape, net, global_photometric='uniform_random_gain', beta=1.0)
+    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet]:  Analog Gain Keynet  -  PASSED')
 
-    (sensor, knet) = keynet.system.Keynet(inshape, net, global_photometric='uniform_bias', gamma=1.0)
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    (sensor, knet) = keynet.system.Keynet(inshape, net, global_photometric='uniform_random_bias', gamma=1.0)
+    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet]:  Analog Bias Keynet  -  PASSED')
 
-    (sensor, knet) = keynet.system.Keynet(inshape, net, global_photometric='uniform_affine', beta=1.0, gamma=1.0)
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-4)
+    (sensor, knet) = keynet.system.Keynet(inshape, net, global_photometric='uniform_random_affine', beta=1.0, gamma=1.0)
+    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-4)
     print('[test_keynet]:  Analog Affine Keynet  -  PASSED')
         
 
@@ -91,32 +87,32 @@ def test_keynet_scipy():
     net.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'));
 
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet_constructor]:  IdentityKeynet (scipy) PASSED')
     vipy.util.save((sensor, knet), 'keynet_lenet_identity.pkl')
         
     (sensor, knet) = keynet.system.PermutationKeynet(inshape, net, do_output_encryption=False)
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet_constructor]:  PermutationKeynet PASSED')    
 
     (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=1, do_output_encryption=False)
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     vipy.util.save((sensor, knet), 'keynet_lenet_stochastic.pkl')        
     print('[test_keynet_constructor]:  StochasticKeynet (alpha=1) PASSED')    
 
     (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=2, do_output_encryption=False)
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet_constructor]:  StochasticKeynet (alpha=2) PASSED')    
     
     (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 27)
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     knet.num_parameters()
     print('[test_keynet_constructor]:  TiledIdentityKeynet PASSED')
         
     (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, 27, do_output_encryption=False)
-    yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
+    yh = knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     knet.num_parameters()    
     print('[test_keynet_constructor]:  TiledPermutationKeynet PASSED')
         
@@ -125,7 +121,7 @@ def test_keynet_scipy():
     net.load_state_dict(torch.load('./models/cifar10_allconv.pth', map_location=torch.device('cpu')));
     x = torch.randn(1, *inshape)
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)    
-    yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
+    yh = knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
     assert np.allclose(yh, y, atol=1E-5)
     vipy.util.save((sensor, knet), 'keynet_allconv.pkl')
@@ -134,7 +130,7 @@ def test_keynet_scipy():
 
     GLOBAL['PROCESSES'] = 8
     (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 32)    
-    yh = knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten()
+    yh = knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
     assert np.allclose(yh, y, atol=1E-5)
     vipy.util.save((sensor, knet), 'keynet_allconv_tiled.pkl')
@@ -147,7 +143,7 @@ def test_keynet_scipy():
 def _test_keynet_torch():
     # FIXME
     (sensor, knet) = keynet.system.Keynet(inshape, net, 'identity', 'torch')
-    assert np.allclose(knet.forward(sensor.encrypt(x).tensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet_constructor]:  IdentityKeynet (torch) PASSED')
 
     
@@ -178,7 +174,7 @@ def test_keynet_mnist():
     # Identity KeyNet
     inshape = (1,28,28)
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)    
-    yh_identity = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
+    yh_identity = knet.forward(sensor.encrypt(X[0]).astensor()).detach().numpy().flatten()
     assert(np.allclose(np.array(y[0]), yh_identity))
     print('[test_keynet_mnist]:  IdentityKeynet: passed')
     print('[test_keynet_mnist]:  IdentityKey parameters: %d' % knet.num_parameters())
@@ -186,28 +182,28 @@ def test_keynet_mnist():
     # IdentityTiled keynet
     inshape = (1,28,28)
     (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, tilesize=32)    
-    yh_identity = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
+    yh_identity = knet.forward(sensor.encrypt(X[0]).astensor()).detach().numpy().flatten()
     assert(np.allclose(np.array(y[0]), yh_identity))
     print('[test_keynet_mnist]:  TiledIdentityKeynet: passed')
     print('[test_keynet_mnist]:  TiledIdentityKey parameters: %d' % knet.num_parameters())
     
     # Permutation KeyLeNet
     (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, tilesize=32)    
-    yh = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
+    yh = knet.forward(sensor.encrypt(X[0]).astensor()).detach().numpy().flatten()
     assert(np.allclose(np.array(y[0]), yh))
     print('[test_keynet_mnist]:  TiledPermutationKeynet: passed')
     print('[test_keynet_mnist]:  TiledPermutationKeynet parameters: %d' % knet.num_parameters())
 
     # Stochastic
     (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=2, beta=2)    
-    yh = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
+    yh = knet.forward(sensor.encrypt(X[0]).astensor()).detach().numpy().flatten()
     assert(np.allclose(np.array(y[0]), yh))
     print('[test_keynet_mnist]:  StochasticKeynet: passed')
     print('[test_keynet_mnist]:  StochasticKeynet parameters: %d' % knet.num_parameters())
 
     # Stochastic Tiled
     (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, alpha=2, beta=2, tilesize=32)    
-    yh = knet.forward(sensor.encrypt(X[0]).tensor()).detach().numpy().flatten()
+    yh = knet.forward(sensor.encrypt(X[0]).astensor()).detach().numpy().flatten()
     assert(np.allclose(np.array(y[0]), yh))
     print('[test_keynet_mnist]:  TiledStochasticKeynet: passed')
     print('[test_keynet_mnist]:  TiledStochasticKeynet parameters: %d' % knet.num_parameters())    
@@ -244,7 +240,7 @@ def test_vgg16_stochastic():
 
 if __name__ == '__main__':
     #test_identity_keynet()
-    #test_tiled_keynet()
+    test_tiled_keynet()
     #test_permutation_keynet()
     #test_photometric_keynet()
     
@@ -254,4 +250,4 @@ if __name__ == '__main__':
     #test_memory_order()
     #test_keynet_mnist()
     #test_vgg16_permutation()
-    test_vgg16()
+    #test_vgg16()

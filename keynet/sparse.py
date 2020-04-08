@@ -17,7 +17,7 @@ import vipy
 from vipy.util import groupbyasdict, flatlist, Stopwatch
 from keynet.util import blockview
 import keynet.globals
-import keynet.joblib
+import itertools
 
 
 def sparse_channelorder_to_pixelorder_matrix(shape, withinverse=False):
@@ -93,8 +93,12 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1,
     """ Returns sparse toeplitz matrix (W) in coo format that is equivalent to per-channel pytorch conv2d (spatial correlation) of filter f with a given image with shape=inshape vectorized
         conv2d(img, f) == np.dot(W, img.flatten()), right multiplied
         Example usage: test_keynet.test_sparse_toeplitz_conv2d()
+        
+        input:
+          -inshape=(inchannels, imageheight, imagewidth)
+          -f.shape = (outchannels, inchannels, kernelheight, kernelwidth)
     """
-    
+
     if _row is None:
         # Parallelize construction by row
         irange = np.arange(0, inshape[1], stride)
@@ -109,13 +113,13 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1,
             UV = (U//stride)*(V//stride)
             (row, col, val) = zip(*[(i*UV+j, 0, x) for (i,x) in enumerate(bias) for j in range(0, UV)])
             lastcol = scipy.sparse.coo_matrix( (val, (row, col)), shape=(T.shape[0], 1))
+            lastrow = scipy.sparse.coo_matrix( ([1], ([0], [T.shape[1]])), shape=(1, T.shape[1]+1), dtype=np.float32)
+            return scipy.sparse.vstack( (scipy.sparse.hstack( (T, lastcol)), lastrow) )            
         else:
-            lastcol = scipy.sparse.coo_matrix((T.shape[0], 1), dtype=np.float32 )
-        lastrow = scipy.sparse.coo_matrix( ([1], ([0], [T.shape[1]])), shape=(1, T.shape[1]+1), dtype=np.float32)
-        return scipy.sparse.vstack( (scipy.sparse.hstack( (T, lastcol)), lastrow) )
+            return T
         
     # Valid shapes
-    assert(len(inshape) == 3 and len(f.shape) == 4)  # 3D tensor inshape=(inchannels, height, width), f.shape=(outchannels, kernelheight, kernelwidth, inchannels)
+    assert(len(inshape) == 3 and len(f.shape) == 4)  # 3D tensor inshape=(inchannels, height, width)
     assert(f.shape[1] == inshape[0])  # equal inchannels
     assert(f.shape[2]==f.shape[3] and f.shape[2]%2 == 1)  # filter is square, odd (FIXME)
     if bias is not None:
@@ -163,11 +167,9 @@ def sparse_toeplitz_avgpool2d(inshape, filtershape, stride):
     F = np.zeros(filtershape, dtype=np.float32)
     for k in range(0,outchannel):
         F[k,k,:,:] = 1.0 / (filtersize*filtersize)
-    return sparse_toeplitz_conv2d(inshape, F, bias=None, stride=stride)
+    return sparse_toeplitz_conv2d(inshape, F, bias=np.zeros(outchannel, dtype=np.float32), stride=stride)
 
 
-                                            
-    
 def sparse_block_diagonal(mats, shape=None, format='coo', dtype=np.float32):
     """Create a sparse matrix with elements in mats as blocks on the diagonal, faster than scipy"""
     if isinstance(mats, np.ndarray) or is_scipy_sparse(mats):
@@ -287,23 +289,6 @@ def sparse_random_doubly_stochastic_matrix(n, k):
     return A
     
 
-def sparse_random_diagonally_dominant_doubly_stochastic_toeplitz_matrix(n, k):
-    d = np.array([0.25, 0.5, 0.25]).reshape(3,1).dot(np.ones( (1,n) ))
-    k_range = [-1, 0, 1]
-    A = scipy.sparse.spdiags(d, k_range, n, n, format='coo').todense()
-
-    B = np.tril(A)
-    C = np.copy(B)
-    np.fill_diagonal(C, 0)
-
-    Ainv = (1.0 / A[0,0])*(B.dot(B.transpose()) - C.dot(C.transpose()))
-
-    print(A)
-    print(Ainv)
-    print(A.dot(Ainv))
-    return A
-
-
 def sparse_random_diagonally_dominant_doubly_stochastic_matrix(n, k, n_iter=100, withinverse=False):
     """Return sparse matrix (nxn) such that at most k elements per row are non-zero and matrix is positive definite and doubly stochastic.
        For non-negative entries, the inverse is also doubly stochastic with the same sparsity pattern.
@@ -402,23 +387,6 @@ class SparseMatrix(object):
     def __repr__(self):
         return str('<keynet.SparseMatrix: H=%d, W=%d, backend=%s>' % (self.shape[0], self.shape[1], str(type(self._matrix))))
 
-    def __getitem__(self, k):
-        if not (isinstance(k, slice) or isinstance(k, tuple)):
-            k = slice(k,k+1)  # force result to be 2D
-
-        if isinstance(k, tuple):
-            (ib, ie) = (k[0].start, k[0].stop)
-            (jb, je) = (k[1].start, k[1].stop)
-            assert k[0].step == 1 or k[0].step is None
-            assert k[1].step == 1 or k[1].step is None             
-            return SparseMatrix(self.clone()._matrix.tocsr()[ib:ie].transpose()[jb:je].transpose().tocoo())
-        else:
-            (ib, ie) = (k.start, k.stop)            
-            assert k.step == 1 or k.step is None 
-            return SparseMatrix(self.clone()._matrix.tocsr()[ib:ie].tocoo())
-            
-        return SparseMatrix(self._matrix.__getitem__(k))  # no copy
-
     def __add__(self, other):
         assert isinstance(other, SparseMatrix), "Invalid input"
         assert self.shape == other.shape, "Invalid shape"
@@ -428,14 +396,14 @@ class SparseMatrix(object):
     def is_torch_sparse(self, x):
         return isinstance(x, torch.sparse.FloatTensor)
 
-    def is_torch_dense(self, x):
+    def is_torch_dense_float32(self, x):
         return isinstance(x, torch.FloatTensor)
 
     def is_scipy_sparse(self, x):
         return scipy.sparse.issparse(x)
 
     def is_torch(self, x):
-        return self.is_torch_sparse(x) or self.is_torch_dense(x)
+        return self.is_torch_sparse(x) or self.is_torch_dense_float32(x)
     
     def is_numpy_dense(self, x):
         return isinstance(x, np.ndarray)
@@ -454,7 +422,7 @@ class SparseMatrix(object):
     
     # Must be overloaded
     def from_torch_dense(self, A):
-        assert self.is_torch_dense(A)                
+        assert self.is_torch_dense_float32(A)                
         return SparseMatrix(A.detach().numpy())
 
     def from_scipy_sparse(self, A):
@@ -478,7 +446,7 @@ class SparseMatrix(object):
         return scipy.sparse.coo_matrix.dot(self._matrix, np.matrix(x_numpy))
         
     def torchdot(self, x_torch):
-        assert self.is_torch_dense(x_torch)
+        assert self.is_torch_dense_float32(x_torch)
         #if self.is_scipy_sparse(self._matrix):
         #    self._matrix = self._matrix.tocsr()
         return torch.as_tensor(scipy.sparse.coo_matrix.dot(self._matrix, np.matrix(x_torch.detach().numpy())))
@@ -506,78 +474,9 @@ class SparseMatrix(object):
         return SparseMatrix(sparse_toeplitz_conv2d(inshape, w.detach().numpy(), bias=b.detach().numpy(), stride=stride))
 
 
-class SparseTiledMatrix(SparseMatrix):
-    def __init__(self, tilesize=None, coo_matrix=None, tilediag=None, shape=None):
-        self._n_processes = keynet.globals.num_processes()
-        self.dtype = None
-        self.shape = (0,0) if shape is None else shape
-        self.ndim = 2
-        self._tilesize = 0 if tilesize is None else tilesize
-        self._d_blockhash_to_tile = {}
-        self._blocklist = []
-
-        if coo_matrix is not None and tilesize is not None:
-            self.from_coomatrix(coo_matrix, tilesize)
-        elif tilediag is not None and shape is not None:
-            self.from_tilediag(shape, tilediag)
-        
-    def __getitem__(self, k):
-        if not (isinstance(k, slice) or isinstance(k, tuple)):
-            k = slice(k,k+1)  # force result to be 2D
-
-        m = self.clone()        
-        (H,W) = m.shape
-        if isinstance(k, tuple):
-            (ib, ie) = (k[0].start // m.tilesize(), k[0].stop // m.tilesize())
-            (jb, je) = (k[1].start // m.tilesize(), k[1].stop // m.tilesize())
-            m.shape = (k[0].stop - k[0].start, k[1].stop - k[1].start)
-            assert k[0].step == 1 or k[0].step is None
-            assert k[1].step == 1 or k[1].step is None             
-        else:
-            (ib, jb) = (k.start // m.tilesize(), 0)
-            (ie, je) = (k.stop // m.tilesize(), W // m.tilesize())
-            assert k.step == 1 or k.step is None
-            m.shape = (k.stop - k.start, W)
-            
-        m._blocklist = [(i,j,k) for (i,j,k) in m._blocklist if i>=ib and i<=ie and j>=jb and j<=je]
-        m._d_blockhash_to_tile = {k:t for (k,t) in m._d_blockhash_to_tile.items() if k in set([k for (i,j,k) in m._blocklist])}
-        return m
-
-    def _block(self, B):
-        return SparseMatrix(B)
-    
-    def __repr__(self):
-        return str('<keynet.SparseTiledMatrix: H=%d, W=%d, tilesize=%d, tiles=%d>' % (*self.shape, self.tilesize(), len(self.tiles())))
-
-    def tilesize(self):
-        return self._tilesize
-
-    def tiles(self):
-        return list(self._d_blockhash_to_tile.values())
-
-    def parallel(self, n_processes):
-        self._n_processes = n_processes
-        return self
-
-    def new(self):
-        return SparseTiledMatrix(tilesize=self.tilesize())
-        
-    def is_tiled_sparse(self, A):
-        return isinstance(A, SparseTiledMatrix)
-
-    def from_torch_conv2d(self, inshape, w, b, stride):        
-        return SparseTiledMatrix(coo_matrix=sparse_toeplitz_conv2d(inshape, w.detach().numpy(), bias=b.detach().numpy(), stride=stride), tilesize=self._tilesize)
-                    
-    def from_torch_dense(self, A):
-        assert self.is_torch_dense(A)
-        return SparseTiledMatrix(coo_matrix=scipy.sparse.coo_matrix(A.detach().numpy()), tilesize=self.tilesize())
-
-    def from_scipy_sparse(self, A):
-        assert self.is_scipy_sparse(A)
-        return SparseTiledMatrix(coo_matrix=A.tocoo(), tilesize=self.tilesize())
-
-    def from_coomatrix(self, T, tilesize):
-        """Given a sparse matrix T, split into non-overlapping nxn blocks or 'tiles' of size self._tilesize x self.Blocksize, and 
+class TiledMatrix(SparseMatrix):
+    def __init__(self, T, tileshape):
+        """Given a sparse matrix T, split into non-overlapping nxn blocks or 'tiles' of size self._tileshape x self.Blocksize, and 
            return an indexed representation for unique submatrices which provides memory efficient matrix vector multiplication when T is self-similar.
         
         Representation
@@ -585,148 +484,175 @@ class SparseTiledMatrix(SparseMatrix):
             M = {k:np.array(), ...} a submatrix dictionary, such that the submatrix for block (i,j)=(B[u][0], B[u][1]) is M[B[u][2]]
         
         """
+        
         assert self.is_scipy_sparse(T), "input must be scipy.sparse.coo_matrix()"
-
-        self._tilesize = tilesize
+        assert isinstance(tileshape, tuple) and len(tileshape)==2 and tileshape[0] > 0 and tileshape[1] > 0, "tileshape must be tuple (tileheight, tilewidth) > 0"
+        
+        self._tileshape = tileshape
         self.dtype = T.dtype
         self.shape = (T.shape[0], T.shape[1])
         self.ndim = 2
 
         T = T.tocoo()
-        n = tilesize
+        (h,w) = tileshape
         (H,W) = self.shape        
 
         d_blockidx_to_tile = defaultdict(list)
         for (i,j,v) in zip(T.row, T.col, T.data):
             (ii,jj,vv) = (int(i), int(j), float(v))  # casting to native python types 
-            (bi,bj) = (ii//n, jj//n)
-            d_blockidx_to_tile[(bi, bj)].append( (ii-bi*n, jj-bj*n, vv) )
+            (bi,bj) = (ii//h, jj//w)
+            d_blockidx_to_tile[(bi, bj)].append( (ii-bi*h, jj-bj*w, vv) )
 
-        self._d_blockhash_to_tile = dict()
-        self._blocklist = []
+        d_blockhash_to_index = dict()
+        self._tiles = []
+        self._blocks = []
         for ((bi,bj), ijv) in d_blockidx_to_tile.items():
-            h = hash(tuple(ijv))
-            if h not in self._d_blockhash_to_tile:
-                self._d_blockhash_to_tile[h] = ijv
-            self._blocklist.append( (bi, bj, h) )
+            blockshape = tileshape if ((bi*h + h) <= H) and ((bj*w + w) <= W) else (H-bi*h, W-bj*w)
+            blockhash = hash(str(sorted(ijv, key=lambda x: (x[0], x[1])))+str(blockshape))
+            if blockhash not in d_blockhash_to_index:
+                (row, col, val) = zip(*ijv)
+                self._tiles.append(self._tiletype(scipy.sparse.coo_matrix( (val, (row, col)), shape=blockshape)))
+                d_blockhash_to_index[blockhash] = len(self._tiles)-1
+            self._blocks.append( (bi*h, bj*w, d_blockhash_to_index[blockhash]) )
+
+        self._blocks = sorted(self._blocks, key=lambda x: (x[0], x[1]))  # rowmajor order
+                              
+    def __repr__(self):
+        return str('<keynet.TiledMatrix: H=%d, W=%d, tileshape=%s, tiles=%d>' % (*self.shape, str(self.tileshape()), len(self.tiles())))
+
+    def __iter__(self):
+        for (i,j,k) in self._blocks:
+            yield (i, j, self._tiles[k])
         
-        # Once we know the sparsity pattern for a single spatial dimension, we can repeat this for all channels
-        # this should avoid having to hash every channel and hash only once to group in the right way
-        # this is also a way to get a fast compressibility
-        # need to bake in the blocksize based on downsampling 
-
-        #for ((bi,bj), ijv) in self._d_blockhash_to_tile.items():
-        #    (row, col, val) = zip(*ijv)
-        #    self._d_blockhash_to_tile[h] = scipy.sparse.coo_matrix( (val, (row, col)), shape=(n,n))
-        # can still have duplicates (sorted tuples) and ragged shapes and block sizes not square
-
-        return self
+    def _tiletype(self, B):
+        return SparseMatrix(B.astype(np.float32))
     
+    def tileshape(self):
+        return self._tileshape
 
-    def from_tilediag(self, shape, T):
-        """Construct block diagonal matrix from tile T repeated down the main diagonal"""
-        assert T.shape[0] == T.shape[1] and T.ndim == 2, "Invalid block, must be square"
+    def tiles(self):
+        return self._tiles
+
+    def blocks(self):
+        return list(self.__iter__())  # expensive!
         
-        self._tilesize = T.shape[0]
-        self.shape = shape
-        self.dtype = T.dtype
-        self.ndim = 2
-
-        (H,W) = shape                    
-        n = self._tilesize
-        self._blocklist = [(i//n, i//n, 0) for i in range(0, min(self.shape), n)]
-        self._d_blockhash_to_tile = {0: self._block(scipy.sparse.coo_matrix(T, dtype=np.float32))}
-        
-        if min(shape) % n != 0:
-            (i,j,k) = self._blocklist[-1]
-            self._blocklist[-1] = (i,j,1)
-            self._d_blockhash_to_tile[1] = self._block(scipy.sparse.coo_matrix(np.eye(n)[0:H-i*n, 0:W-i*n]).astype(np.float32))
-        return self    
-
     def dot(self, x):
         assert self.is_numpy_dense(x)
         return self.torchdot(torch.as_tensor(x)).numpy()
     
     def torchdot(self, x):
         """Input is (C*H*W+1)xN tensor, compute right matrix multiplication T*x, return (-1)xN"""
-
-        n = self._tilesize
+        assert self.shape[1] == x.shape[0], "Non-conformal shape for W=%s, x=%s" % (str(self.shape), str(x.shape))
+        
+        (h,w) = self._tileshape
         (H,W) = self.shape
-        assert W == x.shape[0], "Non-conformal shape for W=%s, x=%s" % (str(self.shape), str(x.shape))
-
-        y = torch.zeros((H, x.shape[1])).type(torch.FloatTensor)  # device?        
-        for (i,j,k) in self._blocklist:
-            (H_clip, W_clip) = (min(H, i*n+n), min(W, j*n+n))
-            y[i*n:H_clip, :] += self._d_blockhash_to_tile[k].tocsr().torchdot(x[j*n:W_clip, :])
+        y = torch.zeros((H, x.shape[1])).type(torch.FloatTensor)  # device?
+        for (i, j, b) in self.__iter__():
+            (H_clip, W_clip) = (i+b.shape[0], j+b.shape[1])
+            y[i:H_clip, :] += b.torchdot(x[j:W_clip, :])
         return y
                 
-    def matmul(self, other):
-        """For two Tiled() object T1, T2, compute T1.dot(T2) and save in T1"""
-        assert isinstance(other, SparseTiledMatrix), "Invalid input - Must be SparseMatrix()"
-        assert other.shape[0] == self.shape[1], "Non-conformal shape"        
-        
-        assert other._tilesize == self._tilesize, "Non-conformal tilesize"    
-        n = self.tilesize()
-        (H,W) = self.shape
-
-        # Accumulate
-        M_accum = {}
-        M_hash = {}
-        d_product = {}        
-        for (i, jj, v) in self._blocklist:
-            if keynet.globals.verbose():
-                print('[keynet.SparseTiledMatrix][%d/%d]: Product "%s" * "%s"...' % (i,jj,str(self), str(other)))
-            for (ii, j, vo) in other._blocklist:
-                if jj == ii and v is not None and vo is not None:
-                    if (v,vo) not in d_product:
-                        d_product[(v,vo)] = self._d_blockhash_to_tile[v].tocsr().clone().matmul(other._d_blockhash_to_tile[vo].tocsc())   # cache
-                        d_product[(v,vo)] = d_product[(v,vo)].tocoo().todense()  # faster add?  why not just make everything dense?
-                    if (i,j) not in M_accum:
-                        M_accum[(i,j)] = d_product[(v,vo)]
-                        M_hash[(i,j)] = hash((v,vo))
-                    else:
-                        M_accum[(i,j)] += d_product[(v,vo)]
-                        M_hash[(i,j)] += hash( (v,vo) )
-
-
-        (B, M) = ([], {})
-        for ((i,j), m) in M_accum.items():
-            k = M_hash[(i,j)]
-            if k not in M:
-                M[k] = self._block(scipy.sparse.coo_matrix(m))
-            B.append( (i,j,k) )                        
-        
-        self._blocklist = B
-        self._d_blockhash_to_tile = M
-        self.shape = (self.shape[0], other.shape[1])
-        return self
-
     def transpose(self):
-        self._blocklist = [(j,i,k) for (i,j,k) in self._blocklist]
-        self._d_blockhash_to_tile = {k:v.transpose() for (k,v) in self._d_blockhash_to_tile.items()}
+        self._blocks = [(j,i,k) for (i,j,k) in self._blocks] if self._blocks is not None else self._blocks
+        self._tiles = [t.transpose() for t in self._tiles]
+        self._tileshape = (self._tileshape[1], self._tileshape[0])
         self.shape = (self.shape[1], self.shape[0])
         return self
     
-    def _tosparse(self, format='coo'):
+    def tocoo(self):
         """Convert to Scipy COOrdinate sparse matrix, this is an expensive operation that should be used for small matrices only and for testing purposes"""
-        ((H,W), n) = (self.shape, self._tilesize)
-        d_blockhash_to_coo = {k:v.tocoo() for (k,v) in self._d_blockhash_to_tile.items()}
-        d = {(i*n, j*n):d_blockhash_to_coo[k] for (i,j,k) in self._blocklist}
+        ((H,W), (h,w)) = (self.shape, self._tileshape)
+        d = {(i, j):b.tocoo() for (i,j,b) in self.__iter__()}  # expensive
         (rows, cols, vals) = zip(*[(int(i)+ii, int(j)+jj, float(v)) for ((ii,jj), b) in d.items() for (i,j,v) in zip(b.row, b.col, b.data)])
         return scipy.sparse.coo_matrix( (vals, (rows, cols)), shape=(H,W))
 
-    def tocoo(self):
-        return self._tosparse()
-
-    def tocsr(self):
-        return self._tosparse(format='csr')
-
-    def tocsc(self):
-        return self._tosparse(format='csc')
-
     def nnz(self):
-        return sum([m.nnz() for m in self._d_blockhash_to_tile.values()])
+        return sum([t.nnz() for t in self._tiles])
 
     def spy(self, mindim=256, showdim=1024):
         return spy(self.tocoo(), mindim, showdim)
 
+
+
+class DiagonalTiledMatrix(TiledMatrix):
+    def __init__(self, B, shape):
+        """Construct block diagonal matrix from block B repeated down the main diagonal"""
+        assert B.ndim == 2, "Invalid block, must be 2D"
+        assert isinstance(shape, tuple) and len(shape) == 2, "invalid shape"
+        assert shape[0] >= B.shape[0] and shape[1] >= B.shape[1]
+        
+        self._tileshape = B.shape
+        self.shape = shape
+        self.dtype = B.dtype
+        self.ndim = 2
+
+        (H,W) = shape                    
+        (h,w) = self._tileshape
+        self._tiles = [self._tiletype(B)] 
+        self._blocks = None
+        
+        if (H % h != 0) or (W % w != 0):
+            self._tiles.append(self._tiletype(scipy.sparse.eye(max(h,w)).tocsr()[0:H%h, 0:W%w].astype(np.float32)))
+
+    def __iter__(self):
+        """Iterator for ((bi,bj), b) tuples along diagonal"""
+        ((H,W), (h,w)) = (self.shape, self._tileshape)
+        for (i, j) in zip(range(0, H, h), range(0, W, w)):
+            yield (i, j, self._tiles[0]) if (i+h<H and j+w<W) else (i, j, self._tiles[1])
+
+
+class Conv2dTiledMatrix(TiledMatrix):    
+    def __init__(self, T, inshape, outshape, tileshape, bias):
+        (Cin, Hin, Win) = inshape
+        (Cout, Hout, Wout) = outshape
+        self._inshape = inshape
+        self._outshape = outshape
+        self._tileshape = tileshape
+        self.shape = T.shape
+
+        assert tileshape[0] <= T.shape[0] and tileshape[1] <= T.shape[1]
+        
+        if bias:
+            assert T.shape[0] == np.prod(outshape) + 1
+            assert T.shape[1] == np.prod(inshape) + 1
+            assert (self.shape[0]-1) % tileshape[0] == 0 and (self.shape[1]-1) % tileshape[1] == 0            
+        else:
+            assert T.shape[0] == np.prod(outshape)
+            assert T.shape[1] == np.prod(inshape)
+            assert self.shape[0] % tileshape[0] == 0 and self.shape[1] % tileshape[1] == 0            
+        
+        # Channel tile structure
+        T = T.tocsr()
+        ((H,W), (h,w)) = (self.shape, self._tileshape)
+        for cout in range(0, Cout):
+            for cin in range(0, Cin):
+                (ib, ie) = (cout*((Hout*Wout)), (cout+1)*(Hout*Wout))
+                (jb, je) = (cin*Hin*Win, (cin+1)*(Hin*Win))
+                C = T[ib:ie, jb:je]
+                if (cout == 0 and cin == 0):
+                    C = TiledMatrix(C, tileshape)
+                    self._tiles = C._tiles  # unique per channel
+                    self._uniqueblocks = [v[0] for (k,v) in groupbyasdict(C._blocks, lambda x: x[2]).items()]                    
+                    self._blocks = [(i, j, k, (Hout*Wout, Hin*Win, len(self._tiles)), (Cout, Cin), 0) for (i,j,k) in C._blocks]  # repeated with stride                    
+                else:
+                    for (i, j, k) in self._uniqueblocks:
+                        self._tiles.append( self._tiletype(C[i:min(i+h, H), j:min(j+w, W)]))
+                              
+        # Bias tile structure
+        if bias:
+            B = TiledMatrix(T[:,-1], tileshape=(self._tileshape[0], 1))
+            assert len(B.tiles()) <= Cout+1  
+            self._blocks += [(i, Cin*Hin*Win, k, (0,0,0), (1,1), len(self._tiles)) for (i,j,k) in B._blocks]  # repeated tiles, FIXME: repeated structure 
+            self._tiles += B._tiles
+
+        # Rowmajor order
+        self._blocks = sorted(self._blocks, key=lambda x: (x[0], x[1]))
+        
+    def __iter__(self):
+        """Iterator for ((bi,bj), b) tuples with blocks repeated across channels"""
+        for (i, j, k, (si,sj,sk), (Ni,Nj), k_tileoffset) in self._blocks:
+            for ni in range(0, Ni):  # row repetition 
+                for nj in range(0, Nj):  # col repetition 
+                    b = self._tiles[k + k_tileoffset + sk*(ni*Nj+nj)]  # new tiles, repeated structure
+                    yield (i + si*ni, j + sj*nj, b)  # offset = stride*repetitions
+                    

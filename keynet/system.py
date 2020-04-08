@@ -21,7 +21,7 @@ from keynet.globals import verbose
 
 
 class KeyedModel(object):
-    def __init__(self, net, inshape, inkey, f_layername_to_keypair, f_astype=None, do_output_encryption=False):
+    def __init__(self, net, inshape, inkey, f_layername_to_keypair, f_module_to_keyedmodule=None, do_output_encryption=False):
         # Assign layerkeys using provided lambda function
         net.eval()
         netshape = keynet.torch.netshape(net, inshape)
@@ -47,31 +47,8 @@ class KeyedModel(object):
             assert 'A' in layerkey[k] and 'Ainv' in layerkey[k], 'Keys not specified for layer "%s"' % k
             assert 'inshape' in netshape[k], 'Layer input shape not specified for layer "%s"' % k
 
-            # Replace torch layers with keyed layers 
-            if isinstance(m, nn.Conv2d):
-                assert m.padding[0] == m.kernel_size[0]//2 and m.padding[1] == m.kernel_size[1]//2, "Padding is assumed to be equal to (kernelsize-1)/2"
-                m_keyed = keynet.layer.KeyedConv2d(inshape=netshape[k]['inshape'],
-                                                   out_channels=m.out_channels,
-                                                   in_channels=m.in_channels,
-                                                   kernel_size=m.kernel_size,
-                                                   stride=m.stride)
-                d_name_to_keyedmodule[k] = m_keyed
-                if '%s_bn' % k not in layernames:
-                    d_name_to_keyedmodule[k] = d_name_to_keyedmodule[k].tosparse(m.weight, m.bias).encrypt(layerkey[k]['A'], layerkey[k]['Ainv']).astype(f_astype)
-            elif isinstance(m, nn.AvgPool2d):
-                m_keyed = keynet.layer.KeyedAvgpool2d(inshape=netshape[k]['inshape'],
-                                                      kernel_size=m.kernel_size,
-                                                      stride=m.stride)
-                d_name_to_keyedmodule[k] = m_keyed.tosparse().encrypt(layerkey[k]['A'], layerkey[k]['Ainv']).astype(f_astype)
-            elif isinstance(m, nn.ReLU):
-                m_keyed = keynet.layer.KeyedReLU()
-                d_name_to_keyedmodule[k] = m_keyed.encrypt(layerkey[k]['A'], layerkey[k]['Ainv']).astype(f_astype)
-            elif isinstance(m, nn.Linear):                
-                m_keyed = keynet.layer.KeyedLinear(out_features=m.out_features,
-                                                   in_features=m.in_features)
-                if '%s_bn' % k not in layernames:                                
-                    d_name_to_keyedmodule[k] = m_keyed.tosparse(m.weight, m.bias).encrypt(layerkey[k]['A'], layerkey[k]['Ainv']).astype(f_astype)
-            elif isinstance(m, nn.BatchNorm2d):
+            # Replace torch layers with keyed layers            
+            if isinstance(m, nn.BatchNorm2d):
                 assert ('_' in k) and hasattr(net, k.split('_')[0]), "Batchnorm layers must be named 'mylayername_bn' for corresponding linear layer mylayername.  (e.g. 'conv3_bn')"
                 k_prev = k.split('_')[0]
                 assert k_prev in d_name_to_keyedmodule, "Batchnorm layer named 'mylayer_bn' must come after 'mylayer' (e.g. 'conv3_bn' must come after 'conv3')"
@@ -80,18 +57,22 @@ class KeyedModel(object):
                                                                        m.running_mean, m.running_var, 1E-5,
                                                                        m.weight, m.bias)
                 # Replace module k_prev with fused weights
-                d_name_to_keyedmodule[k_prev].tosparse(bn_weight, bn_bias).encrypt(layerkey[k_prev]['A'], layerkey[k_prev]['Ainv']).astype(f_astype)
+                (m_prev.weight, m_prev.bias) = (bn_weight, bn_bias)
+                d_name_to_keyedmodule[k_prev] = f_module_to_keyedmodule(m_prev, netshape[k]['inshape'], netshape[k]['outshape'], layerkey[k_prev]['A'], layerkey[k_prev]['Ainv'])
             elif isinstance(m, nn.Dropout):
                 pass  # identity matrix at test time, ignore me
-            else:
-                raise ValueError('unsupported layer type "%s"' % str(type(m)))
+            elif '%s_bn' % k not in layernames:
+                d_name_to_keyedmodule[k] = f_module_to_keyedmodule(m, netshape[k]['inshape'], netshape[k]['outshape'], layerkey[k]['A'], layerkey[k]['Ainv'])
 
         self._keynet = nn.Sequential(d_name_to_keyedmodule)
         self._embeddingkey = layerkey['output']
         self._imagekey = layerkey['input']
         self._layernames = layernames
         self._outshape = netshape[netshape['output']]['outshape']
-        
+
+    def __repr__(self):
+        return self._keynet.__repr__()
+    
     def __getattr__(self, attr):
         try:
             return self._keynet.__getattr__(attr)
@@ -132,12 +113,11 @@ class KeyedSensor(keynet.layer.KeyedLayer):
     def __init__(self, inshape, keypair):
         assert isinstance(inshape, tuple) and len(inshape) == 3
         (self._encryptkey, self._decryptkey) = keypair
-        self._encryptkey = keynet.sparse.SparseMatrix(self._encryptkey)
-        self._decryptkey = keynet.sparse.SparseMatrix(self._decryptkey)        
-        super(KeyedSensor, self).__init__(W=self._encryptkey)    
         self._inshape = (1, *inshape)  # 1xCxHxW
         self._tensor = None
         self._im = None
+        self.W = keynet.sparse.SparseMatrix(self._encryptkey)
+        self._layertype = 'input'
         
     def __repr__(self):
         return str('<KeySensor: height=%d, width=%d, channels=%d>' % (self._inshape[2], self._inshape[3], self._inshape[1]))
@@ -176,7 +156,7 @@ class KeyedSensor(keynet.layer.KeyedLayer):
         return (self._encryptkey, self._decryptkey)
 
     def key(self):
-        return self._decryptkey.tocoo()
+        return self._decryptkey
     
     def isencrypted(self):
         """An encrypted image is converted from NxCxHxW tensor to Nx(C*H*W+1)"""
@@ -219,26 +199,14 @@ class OpticalFiberBundle(KeyedSensor):
         return self._im
     
 
-def astype(backend='scipy', tilesize=None):
-    allowable_backend = ['torch', 'scipy']
-    
+def layergen(module, inshape, outshape, A, Ainv, tileshape=None, backend='scipy'):
     if backend == 'scipy':
-        return lambda A: keynet.sparse.SparseMatrix(A)
-    elif backend == 'torch':
-        return lambda A: keynet.torch.SparseMatrix(A)
-    elif backend == 'scipy-tiled':
-        assert tilesize is not None
-        return lambda A: keynet.sparse.SparseTiledMatrix(coo_matrix=A, tilesize=tilesize)
-    elif backend == 'torch-tiled':
-        assert tilesize is not None        
-        return lambda A: keynet.torch.SparseTiledMatrix(coo_matrix=A, tilesize=tilesize)
-    elif backend == None:
-        return lambda A: None  # discard for testing
+        return keynet.layer.KeyedLayer(module, inshape, outshape, A, Ainv, tileshape=tileshape)
     else:
         raise ValueError('invalid backend "%s"' % backend)
 
 
-def keygen(shape, global_geometric, local_geometric, global_photometric, local_photometric, memoryorder='channel', alpha=None, beta=None, gamma=None, seed=None, blockshape=None, permute_at_level=None, blocksize=None):
+def keygen(shape, global_geometric, local_geometric, global_photometric, local_photometric, memoryorder='channel', alpha=None, beta=None, gamma=None, seed=None, hierarchical_blockshape=None, hierarchical_permute_at_level=None, blocksize=None):
     allowable_memoryorder = set(['channel', 'block'])
     allowable_global_geometric = set(['identity', 'permutation', 'hierarchical_permutation', 'hierarchical_rotation', 'givens_orthogonal'])    
     allowable_local_geometric = set(['identity', 'permutation', 'doubly_stochastic', 'givens_orthogonal'])
@@ -265,16 +233,16 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
     elif global_geometric == 'permutation':
         (G, Ginv) = sparse_permutation_matrix(N, withinverse=True)
     elif global_geometric == 'hierarchical_permutation':
-        assert blockshape is not None and permute_at_level is not None
+        assert hierarchical_blockshape is not None and hierarchical_permute_at_level is not None
         (A, Ainv) = keynet.sparse.sparse_channelorder_to_pixelorder_matrix((channels, height, width), withinverse=True)
-        (G, Ginv) = hierarchical_block_permutation_matrix((height, width, channels), blockshape, permute_at_level, min_blocksize=8, seed=seed, twist=False, withinverse=True)
+        (G, Ginv) = hierarchical_block_permutation_matrix((height, width, channels), hierarchical_blockshape, hierarchical_permute_at_level, min_blocksize=8, seed=seed, twist=False, withinverse=True)
         (G, Ginv) = (Ainv.dot(G).dot(A), Ainv.dot(Ginv).dot(A))  # CxHxW -> HxWxC -> hierarchical permute in HxWxC order -> CxHxW
         if memoryorder != 'channel':
             (G, Ginv) = (c.dot(G).dot(cinv), c.dot(Ginv).dot(cinv))        
     elif global_geometric == 'hierarchical_rotation':
-        assert blockshape is not None and permute_at_level is not None
+        assert hierarchical_blockshape is not None and hierarchical_permute_at_level is not None
         (A, Ainv) = keynet.sparse.sparse_channelorder_to_pixelorder_matrix((channels, height, width), withinverse=True)                
-        (G, Ginv) = hierarchical_block_permutation_matrix((height, width, channels), blockshape, permute_at_level, min_blocksize=8, seed=seed, twist=True, withinverse=True)
+        (G, Ginv) = hierarchical_block_permutation_matrix((height, width, channels), hierarchical_blockshape, hierarchical_permute_at_level, min_blocksize=8, seed=seed, twist=True, withinverse=True)
         (G, Ginv) = (Ainv.dot(G).dot(A), Ainv.dot(Ginv).dot(A))  # CxHxW -> HxWxC -> hierarchical permute in HxWxC order -> CxHxW
         if memoryorder != 'channel':
             (G, Ginv) = (c.dot(G).dot(cinv), c.dot(Ginv).dot(cinv))        
@@ -356,19 +324,19 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
 
 
 def Keynet(inshape, net=None, backend='scipy', global_photometric='identity', local_photometric='identity', global_geometric='identity', local_geometric='identity', memoryorder='channel',
-           do_output_encryption=False, alpha=None, beta=None, gamma=None, blockshape=None, permute_at_level=None, blocksize=None):
+           do_output_encryption=False, alpha=None, beta=None, gamma=None, hierarchical_blockshape=None, hierarchical_permute_at_level=None, blocksize=None, tileshape=None):
     
-    f_backend = astype(backend, blocksize)
+    f_layergen = lambda module, inshape, outshape, A, Ainv: layergen(module, inshape, outshape, A, Ainv, tileshape=tileshape, backend=backend)
     f_keypair = lambda layername, shape:  keygen(shape, 
                                                  global_photometric=global_photometric if 'relu' not in layername or global_photometric == 'identity' else 'identity',
                                                  local_photometric=local_photometric if 'relu' not in layername or local_photometric == 'identity' else 'identity',
                                                  global_geometric=global_geometric if 'relu' not in layername or global_geometric == 'identity' else 'permutation',
                                                  local_geometric=local_geometric if 'relu' not in layername or local_geometric == 'identity' else 'permutation',
                                                  memoryorder=memoryorder,                                                                                                  
-                                                 blocksize=blocksize, alpha=alpha, beta=beta, gamma=gamma, blockshape=blockshape, permute_at_level=permute_at_level)
+                                                 blocksize=blocksize, alpha=alpha, beta=beta, gamma=gamma, hierarchical_blockshape=hierarchical_blockshape, hierarchical_permute_at_level=hierarchical_permute_at_level)
     
     sensor = KeyedSensor(inshape, f_keypair('input', inshape))
-    model = KeyedModel(net, inshape, sensor.key(), f_keypair, f_backend, do_output_encryption=do_output_encryption) if net is not None else None
+    model = KeyedModel(net, inshape, sensor.key(), f_keypair, f_layergen, do_output_encryption=do_output_encryption) if net is not None else None
     return (sensor, model)
 
 
