@@ -18,6 +18,7 @@ import keynet.layer
 import keynet.fiberbundle
 from keynet.util import blockview
 from keynet.globals import verbose
+import copy 
 
 
 class KeyedModel(object):
@@ -25,7 +26,8 @@ class KeyedModel(object):
         # Assign layerkeys using provided lambda function
         net.eval()
         netshape = keynet.torch.netshape(net, inshape)
-        (i,o) = (netshape['input'], netshape['output'])              
+        
+        (i,o) = (netshape['input']['nextlayer'], netshape['output']['prevlayer'])              
         layerkey = {k:{'outkeypair':f_layername_to_keypair(k, v['outshape']),
                        'prevlayer':v['prevlayer']}
                     for (k,v) in netshape.items() if k not in set(['input', 'output'])}
@@ -49,26 +51,39 @@ class KeyedModel(object):
 
             # Replace torch layers with keyed layers            
             if isinstance(m, nn.BatchNorm2d):
-                assert ('_' in k) and hasattr(net, k.split('_')[0]), "Batchnorm layers must be named 'mylayername_bn' for corresponding linear layer mylayername.  (e.g. 'conv3_bn')"
+                assert '_bn' in k, "Batchnorm layers must be named 'mylayername_bn' for corresponding linear layer mylayername.  (e.g. 'conv3_bn')"
                 k_prev = k.split('_')[0]
-                assert k_prev in d_name_to_keyedmodule, "Batchnorm layer named 'mylayer_bn' must come after 'mylayer' (e.g. 'conv3_bn' must come after 'conv3')"
-                m_prev = getattr(net, k_prev)
+                assert netshape[k]['prevlayer'] == k_prev, "Batchnorm layer named 'mylayer_bn' must come right after 'mylayer' (e.g. 'conv3_bn' must come right after 'conv3')"
+                m_prev = copy.deepcopy(getattr(net, k_prev))  # do not overwrite
                 (bn_weight, bn_bias) = keynet.torch.fuse_conv2d_and_bn(m_prev.weight, m_prev.bias,
                                                                        m.running_mean, m.running_var, 1E-5,
                                                                        m.weight, m.bias)
                 # Replace module k_prev with fused weights
-                (m_prev.weight, m_prev.bias) = (bn_weight, bn_bias)
-                d_name_to_keyedmodule[k_prev] = f_module_to_keyedmodule(m_prev, netshape[k]['inshape'], netshape[k]['outshape'], layerkey[k_prev]['A'], layerkey[k_prev]['Ainv'])
-            elif isinstance(m, nn.Dropout):
+                (m_prev.weight, m_prev.bias) = (torch.nn.Parameter(bn_weight), torch.nn.Parameter(bn_bias))
+                d_name_to_keyedmodule[k_prev] = f_module_to_keyedmodule(m_prev, netshape[k_prev]['inshape'], netshape[k]['outshape'], layerkey[k]['A'], layerkey[k_prev]['Ainv'])
+
+            elif isinstance(m, nn.ReLU):
+                # Apply key to previous layer (which was skipped) and make this layer identity
+                k_prev = netshape[k]['prevlayer']
+                
+                m_prev = getattr(net, k_prev)
+                B = layerkey[k]['A'].dot(layerkey[k]['Ainv'])
+                d_name_to_keyedmodule[k_prev] = f_module_to_keyedmodule(m_prev, netshape[k_prev]['inshape'], netshape[k_prev]['outshape'], B.dot(layerkey[k_prev]['A']), layerkey[k_prev]['Ainv'])                
+                d_name_to_keyedmodule[k] = copy.deepcopy(m)  # unkeyed
+
+            elif isinstance(m, nn.Dropout):    
                 pass  # identity matrix at test time, ignore me
-            elif '%s_bn' % k not in layernames:
+            elif netshape[k]['nextlayer'] is not None and (('%s_bn' % k) == netshape[k]['nextlayer'] or 'relu' in netshape[k]['nextlayer']):
+                # Wait to key this layer to merge with next layer 
+                pass
+            else:
                 d_name_to_keyedmodule[k] = f_module_to_keyedmodule(m, netshape[k]['inshape'], netshape[k]['outshape'], layerkey[k]['A'], layerkey[k]['Ainv'])
 
         self._keynet = nn.Sequential(d_name_to_keyedmodule)
         self._embeddingkey = layerkey['output']
         self._imagekey = layerkey['input']
         self._layernames = layernames
-        self._outshape = netshape[netshape['output']]['outshape']
+        self._outshape = netshape['output']['outshape']
 
     def __repr__(self):
         return self._keynet.__repr__()
@@ -103,7 +118,7 @@ class KeyedModel(object):
         return self
         
     def num_parameters(self):
-        return sum([c.nnz() for (k,c) in self._keynet.named_children() if hasattr(c, 'nnz')])
+        return sum([c.nnz() for (k,c) in self._keynet.named_children() if isinstance(c, keynet.layer.KeyedLayer)])
 
     def layers(self):
         return self._layernames
@@ -349,11 +364,11 @@ def PermutationKeynet(inshape, net, do_output_encryption=False):
 
 
 def TiledIdentityKeynet(inshape, net, tilesize):
-    return Keynet(inshape, net, backend='scipy-tiled', blocksize=tilesize)
+    return Keynet(inshape, net, backend='scipy', tileshape=(tilesize, tilesize))
 
 
 def TiledPermutationKeynet(inshape, net, tilesize):
-    return Keynet(inshape, net, global_geometric='permutation', backend='scipy-tiled', blocksize=tilesize)
+    return Keynet(inshape, net, global_geometric='permutation', backend='scipy', tileshape=(tilesize, tilesize))
 
 
 def OpticalFiberBundleKeynet(inshape, net):

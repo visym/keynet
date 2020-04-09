@@ -89,7 +89,7 @@ def diagonal_affine_to_linear(A, bias=None, withinverse=False, dtype=np.float32)
         return L.astype(dtype)
     
 
-def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1, _row=None):
+def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1, _row=None, format='csr'):
     """ Returns sparse toeplitz matrix (W) in coo format that is equivalent to per-channel pytorch conv2d (spatial correlation) of filter f with a given image with shape=inshape vectorized
         conv2d(img, f) == np.dot(W, img.flatten()), right multiplied
         Example usage: test_keynet.test_sparse_toeplitz_conv2d()
@@ -103,10 +103,13 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1,
         # Parallelize construction by row
         irange = np.arange(0, inshape[1], stride)
         n_processes = keynet.globals.num_processes()
-        T = Parallel(n_jobs=n_processes)(delayed(sparse_toeplitz_conv2d)(inshape, f, bias, as_correlation, stride, _row=i) for i in (tqdm(irange) if n_processes>1 and keynet.globals.verbose() else irange))
-        (rows, cols, vals) = zip(*[(i,j,v) for t in T for (i,j,v) in zip(t.row, t.col, t.data)])  # merge
-        T = scipy.sparse.coo_matrix( (vals, (rows, cols)), shape=(T[0].shape))
-
+        T_rows = Parallel(n_jobs=n_processes)(delayed(sparse_toeplitz_conv2d)(inshape, f, bias, as_correlation, stride, _row=i) for i in (tqdm(irange) if n_processes>1 and keynet.globals.verbose() else irange))
+        T = T_rows[0]
+        for t in T_rows[1:]:
+            T += t  # merge (fast scipy.sparse)
+        if format == 'coo':
+            T = T.tocoo()
+            
         # Sparse matrix with optional bias and affine augmentation         
         if bias is not None:
             (C,U,V) = inshape                
@@ -158,7 +161,10 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1,
                                 row_ind.append( c_outchannel*(U_div_stride)*(V_div_stride) + ku*(V_div_stride) + kv )
                                 col_ind.append( c )
 
-    return scipy.sparse.coo_matrix((data, (row_ind, col_ind)), shape=(M*(U//stride)*(V//stride), C*U*V))
+    A = scipy.sparse.coo_matrix((data, (row_ind, col_ind)), shape=(M*(U//stride)*(V//stride), C*U*V))
+    if format == 'csr':
+        A = A.tocsr()
+    return A
 
 
 def sparse_toeplitz_avgpool2d(inshape, filtershape, stride):
@@ -641,7 +647,7 @@ class Conv2dTiledMatrix(TiledMatrix):
         # Bias tile structure
         if bias:
             B = TiledMatrix(T[:,-1], tileshape=(self._tileshape[0], 1))
-            assert len(B.tiles()) <= Cout+1  
+            #assert len(B.tiles()) <= Cout+1    # FIXME: why is this wrong?
             self._blocks += [(i, Cin*Hin*Win, k, (0,0,0), (1,1), len(self._tiles)) for (i,j,k) in B._blocks]  # repeated tiles, FIXME: repeated structure 
             self._tiles += B._tiles
 

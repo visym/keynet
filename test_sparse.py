@@ -62,7 +62,7 @@ def test_blockview():
 
     # Toeplitz matrix block
     A = sparse_toeplitz_conv2d( (C,U,V), f, as_correlation=True, stride=stride)
-    W = keynet.util.matrix_blockview(A, (U,V), b)
+    W = keynet.util.matrix_blockview(A.tocoo(), (U,V), b)
     W_blk1 = W.todense()[0:b*b, 0:b*b]
     W_blk2 = W.todense()[-b*b:, -b*b:]    
     assert np.allclose(W_blk1, W_blk2)

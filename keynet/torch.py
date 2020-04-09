@@ -38,22 +38,27 @@ def netshape(net, inshape):
         return hooklist
 
     def _get_shape(m, input, output):
-        if 'input' not in d_modulename_to_shape:
-            d_modulename_to_shape['input'] = m.__name  # first
-        if 'output' in d_modulename_to_shape:
-            del d_modulename_to_shape['output']         # delete and            
-        prevlayer = [k for k in d_modulename_to_shape][-1]
         inshape = (input[0].shape[1], input[0].shape[2], input[0].shape[3]) if len(input[0].shape) == 4 else (input[0].shape[1], 1, 1)  # canonicalize to (C,H,W)
         outshape = (output.shape[1], output.shape[2], output.shape[3]) if len(output.shape) == 4 else (output.shape[1], 1, 1)  # canonicalize to (C,H,W)       
+
+        if 'input' not in d_modulename_to_shape:
+            d_modulename_to_shape['input'] = {'prevlayer':None, 'nextlayer':m.__name, 'inshape':inshape, 'outshape':outshape}  # first
+        if 'output' in d_modulename_to_shape:
+            del d_modulename_to_shape['output']         # delete and            
+
+        prevlayer = [k for k in d_modulename_to_shape][-1]  # FIXME: may have more than one prevlayer
         d_modulename_to_shape[m.__name] = {'inshape':inshape,
                                            'outshape':outshape,
                                            'prevlayer':prevlayer}
-        d_modulename_to_shape['output'] = m.__name  # reinsert for last        
+        d_modulename_to_shape[prevlayer]['nextlayer'] = m.__name
+        d_modulename_to_shape[m.__name]['nextlayer'] = None
+        d_modulename_to_shape['output'] = {'nextlayer':None, 'prevlayer':m.__name, 'inshape':inshape, 'outshape':outshape}  # reinsert for last
         delattr(m, '__name')
 
     hooks = _layer_visitor(_get_shape, net)
     y_dummy = net.forward(x_dummy)
     [h.remove() for h in hooks]
+
     return d_modulename_to_shape
 
 

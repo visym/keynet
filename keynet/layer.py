@@ -34,8 +34,7 @@ class KeyedLayer(nn.Module):
                 self.W = keynet.sparse.Conv2dTiledMatrix(self.W, self._inshape, self._outshape, self._tileshape, bias=True)
             
         elif isinstance(module, nn.ReLU):
-            self._repr = 'ReLU: '
-            self.W = A.dot(Ainv)  # Key!
+            raise ValueError('ReLU layer should be merged with previous layer')
 
         elif isinstance(module, nn.AvgPool2d):
             assert isinstance(module.kernel_size, int) or len(module.kernel_size)==2 and (module.kernel_size[0] == module.kernel_size[1]), "Kernel must be square"
@@ -55,12 +54,11 @@ class KeyedLayer(nn.Module):
             self.W = self.W.dot(Ainv) if A is None else A.dot(self.W).dot(Ainv)  # optional outkey
             
         elif isinstance(module, nn.BatchNorm2d):
-            self._repr = 'BatchNorn2d'    # Merged with conv2d at test time, ignore me
-            self.W = None
+            raise ValueError('batchnorm layer should be named "mylayer_bn" for batchnorm of "mylayer" and should come right before "mylayer" to merge keyed layers')
             
         elif isinstance(module, nn.Dropout):
-            self._repr = 'Dropout'     # identity matrix at test time, ignore me
-            self.W = None
+            self._repr = 'Dropout: inshape=%s' % (str(inshape))
+            self.W = A.dot(Ainv)  # identity at test time, include because there may be ReLU following dropout
             
         else:
             raise ValueError('unsupported layer type "%s"' % str(type(module)))
@@ -73,7 +71,7 @@ class KeyedLayer(nn.Module):
         return str('<%s, %s>' % (self._repr, str_shape))
 
     def forward(self, x_affine):
-        y = self.W.torchdot(x_affine.t()).t()        
+        y = self.W.torchdot(x_affine.t()).t()
         return y if not 'ReLU' in self._layertype else F.relu(y)
         
     def decrypt(self, Ainv, x_affine):

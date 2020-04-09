@@ -1,7 +1,6 @@
 import numpy as np
 from numpy.linalg import multi_dot 
 import keynet.util
-import keynet.blockpermute
 import vipy.image
 import vipy.visualize
 import copy
@@ -10,9 +9,6 @@ import torchvision
 from torch import nn
 from torchvision import datasets, transforms
 from vipy.util import Stopwatch, tempdir
-from keynet.sparse import sparse_permutation_matrix, sparse_generalized_permutation_block_matrix_with_inverse
-from keynet.sparse import sparse_generalized_stochastic_block_matrix_with_inverse, sparse_identity_matrix
-from keynet.torch import homogenize, dehomogenize
 from keynet.sparse import sparse_toeplitz_conv2d
 from keynet.sparse import sparse_toeplitz_avgpool2d
 from keynet.util import torch_avgpool2d_in_scipy, torch_conv2d_in_scipy
@@ -339,30 +335,9 @@ def print_parameters():
     (sensor, knet) = keynet.system.PermutationKeynet(inshape, net)
     print('[figures.print_parameters]:  PermutationKeynet (lenet) parameters=%d' % (knet.num_parameters()))        
 
-    (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=1, beta=1)
-    print('[figures.print_parameters]:  StochasticKeynet (lenet) alpha=1, parameters=%d' % (knet.num_parameters()))         
-   
-    (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=2, beta=1)
-    print('[figures.print_parameters]:  StochasticKeynet (lenet) alpha=2, parameters=%d' % (knet.num_parameters()))        
+    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, 4)
+    print('[figures.print_parameters]:  PermutationKeynet (lenet) parameters=%d' % (knet.num_parameters()))        
 
-    (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=4, beta=1)
-    print('[figures.print_parameters]:  StochasticKeynet (lenet) alpha=4, parameters=%d' % (knet.num_parameters()))        
-    
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 7, n_processes=2)
-    print('[figures.print_parameters]:  TiledIdentityKeynet (lenet) parameters=%d' % (knet.num_parameters()))        
-
-    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, 7, n_processes=2)
-    print('[figures.print_parameters]:  TiledPermutationKeynet (lenet) parameters=%d' % (knet.num_parameters()))        
-
-    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 7, n_processes=2, alpha=1, beta=1)
-    print('[figures.print_parameters]:  TiledStochasticKeynet (lenet) alpha=1, beta=1, parameters=%d' % (knet.num_parameters()))        
-    
-    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 7, n_processes=2, alpha=2, beta=1)
-    print('[figures.print_parameters]:  TiledStochasticKeynet (lenet) alpha=2, beta=1, parameters=%d' % (knet.num_parameters()))        
-
-    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 7, n_processes=2, alpha=4, beta=1)
-    print('[figures.print_parameters]:  TiledStochasticKeynet (lenet) alpha=4, beta=1, parameters=%d' % (knet.num_parameters()))        
-    
     inshape = (3,32,32)
     net = keynet.cifar10.AllConvNet()    
     net.load_state_dict(torch.load('./models/cifar10_allconv.pth', map_location=torch.device('cpu')));
@@ -374,24 +349,8 @@ def print_parameters():
     (sensor, knet) = keynet.system.PermutationKeynet(inshape, net)    
     print('[figures.print_parameters]:  PermutationKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))
 
-    (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=2, beta=1)    
-    print('[figures.print_parameters]:  StochasticKeynet (allconvnet) alpha=2 parameters=%d' % (knet.num_parameters()))
-
-    (sensor, knet) = keynet.system.StochasticKeynet(inshape, net, alpha=4, beta=1)    
-    print('[figures.print_parameters]:  StochasticKeynet (allconvnet) alpha=4 parameters=%d' % (knet.num_parameters()))
-
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 8, n_processes=24)    
-    print('[figures.print_parameters]:  TiledIdentityKeynet-8 (allconvnet) parameters=%d' % (knet.num_parameters()))    
-
-    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, 8, n_processes=24)
+    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, 8)
     print('[figures.print_parameters]:  TiledPermutationKeynet-8 (allconvnet) parameters=%d' % (knet.num_parameters()))        
-
-    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 8, n_processes=24, alpha=2, beta=1)
-    print('[figures.print_parameters]:  TiledStochasticKeynet-8 (allconvnet) alpha=2, beta=1, parameters=%d' % (knet.num_parameters()))        
-
-    (sensor, knet) = keynet.system.TiledStochasticKeynet(inshape, net, 8, n_processes=24, alpha=4, beta=1)
-    print('[figures.print_parameters]:  TiledStochasticKeynet-8 (allconvnet) alpha=4, beta=1, parameters=%d' % (knet.num_parameters()))        
-    
 
 if __name__ == '__main__':
     print_parameters()

@@ -214,10 +214,9 @@ def test_vgg16():
     keynet.globals.num_processes(48)
     net = keynet.vgg.VGG16()
     print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
-    #(sensor, model) = keynet.system.TiledIdentityKeynet( (3, 224, 224), net, 224//4)
-    (sensor, model) = keynet.system.IdentityKeynet( (3, 224, 224), net, backend=None)
-    print('vgg16: keynet num parameters=%d' % model.num_parameters())
-    return 
+    (sensor, model) = keynet.system.TiledIdentityKeynet( (3, 224, 224), net, 224//4)
+    #(sensor, model) = keynet.system.IdentityKeynet( (3, 224, 224), net, backend=None)
+    print('vgg16: keynet-56 num parameters=%d' % model.num_parameters())
 
 
 def test_vgg16_permutation():
@@ -240,7 +239,7 @@ def test_vgg16_stochastic():
 
 if __name__ == '__main__':
     #test_identity_keynet()
-    test_tiled_keynet()
+    #test_tiled_keynet()
     #test_permutation_keynet()
     #test_photometric_keynet()
     
@@ -250,4 +249,4 @@ if __name__ == '__main__':
     #test_memory_order()
     #test_keynet_mnist()
     #test_vgg16_permutation()
-    #test_vgg16()
+    test_vgg16()
