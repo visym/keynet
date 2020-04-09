@@ -336,7 +336,7 @@ def print_parameters():
     print('[figures.print_parameters]:  PermutationKeynet (lenet) parameters=%d' % (knet.num_parameters()))        
 
     (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, 4)
-    print('[figures.print_parameters]:  PermutationKeynet (lenet) parameters=%d' % (knet.num_parameters()))        
+    print('[figures.print_parameters]:  TiledPermutationKeynet (lenet) parameters=%d' % (knet.num_parameters()))        
 
     inshape = (3,32,32)
     net = keynet.cifar10.AllConvNet()    
