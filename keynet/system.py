@@ -249,7 +249,7 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         (G, Ginv) = sparse_permutation_matrix(N, withinverse=True)
     elif global_geometric == 'hierarchical_permutation':
         assert hierarchical_blockshape is not None and hierarchical_permute_at_level is not None
-        (A, Ainv) = keynet.sparse.sparse_channelorder_to_pixelorder_matrix((channels, height, width), withinverse=True)
+        (A, Ainv) = keynet.sparse.sparse_channelorder_to_pixelorder_matrix((channels, height, width), withinverse=True)  # TESTING
         (G, Ginv) = hierarchical_block_permutation_matrix((height, width, channels), hierarchical_blockshape, hierarchical_permute_at_level, min_blocksize=8, seed=seed, twist=False, withinverse=True)
         (G, Ginv) = (Ainv.dot(G).dot(A), Ainv.dot(Ginv).dot(A))  # CxHxW -> HxWxC -> hierarchical permute in HxWxC order -> CxHxW
         if memoryorder != 'channel':
@@ -272,20 +272,20 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         (g, ginv) = (sparse_identity_matrix(N), sparse_identity_matrix(N))        
     elif local_geometric == 'permutation':
         assert blocksize is not None
-        g = keynet.sparse.SparseTiledMatrix(tilediag=sparse_permutation_matrix(blocknumel), shape=(N,N)).tocoo().astype(np.float32)
+        g = keynet.sparse.DiagonalTiledMatrix(sparse_permutation_matrix(blocknumel), shape=(N,N)).tocoo().astype(np.float32)
         ginv = g.transpose()
     elif local_geometric == 'doubly_stochastic':
         assert blocksize is not None and blocksize < 4096 and alpha is not None
         (g, ginv) = sparse_random_diagonally_dominant_doubly_stochastic_matrix(blocknumel, int(alpha), withinverse=True)  # expensive inverse
-        g = keynet.sparse.SparseTiledMatrix(tilediag=g, shape=(N,N)).tocoo()
-        ginv = keynet.sparse.SparseTiledMatrix(tilediag=ginv, shape=(N,N)).tocoo()
+        g = keynet.sparse.DiagonalTiledMatrix(g, shape=(N,N)).tocoo()
+        ginv = keynet.sparse.DiagonalTiledMatrix(ginv, shape=(N,N)).tocoo()
     elif local_geometric == 'givens_orthogonal':
         assert alpha is not None and blocksize is not None
         (g, ginv) = sparse_orthogonal_matrix(blocknumel, int(alpha), balanced=True, withinverse=True)
         (A, Ainv) = sparse_permutation_matrix(blocknumel, withinverse=True)
         (g, ginv) = (A.dot(g), ginv.dot(Ainv))
-        g = keynet.sparse.SparseTiledMatrix(tilediag=g, shape=(N,N)).tocoo().astype(np.float32)
-        ginv = keynet.sparse.SparseTiledMatrix(tilediag=ginv, shape=(N,N)).tocoo().astype(np.float32)
+        g = keynet.sparse.DiagonalTiledMatrix(g, shape=(N,N)).tocoo().astype(np.float32)
+        ginv = keynet.sparse.DiagonalTiledMatrix(ginv, shape=(N,N)).tocoo().astype(np.float32)
     else:
         raise ValueError("Invalid local geometric transform '%s' - must be in '%s'" % (local_geometric, str(allowable_local_geometric)))        
     (g, ginv) = (sparse_affine_to_linear(g), sparse_affine_to_linear(ginv))

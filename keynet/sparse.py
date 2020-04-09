@@ -24,7 +24,7 @@ def sparse_channelorder_to_pixelorder_matrix(shape, withinverse=False):
     """Return permutation matrix that will convert an image in CxHxW memory layout (channel order) to HxWxC memory layout (pixel order)"""
     (C,H,W) = shape 
     img = np.array(range(0, np.prod(shape))).reshape(shape)
-    img_permute = np.moveaxis(img, 2, 0)   # CxHxW -> HxWxC
+    img_permute = np.moveaxis(img, 0, 2)   # CxHxW -> HxWxC    
     cols = img_permute.flatten()    
     rows = range(0, len(cols))
     vals = np.ones_like(rows)
@@ -604,7 +604,7 @@ class DiagonalTiledMatrix(TiledMatrix):
         """Iterator for ((bi,bj), b) tuples along diagonal"""
         ((H,W), (h,w)) = (self.shape, self._tileshape)
         for (i, j) in zip(range(0, H, h), range(0, W, w)):
-            yield (i, j, self._tiles[0]) if (i+h<H and j+w<W) else (i, j, self._tiles[1])
+            yield (i, j, self._tiles[0]) if (i+h<H and j+w<W) else (i, j, self._tiles[-1])
 
 
 class Conv2dTiledMatrix(TiledMatrix):    
