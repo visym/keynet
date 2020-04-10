@@ -258,10 +258,10 @@ def test_vgg16_orthogonal():
 
 
 if __name__ == '__main__':
-    test_identity_keynet()
-    test_tiled_keynet()
-    test_permutation_keynet()
-    test_photometric_keynet()
+    #test_identity_keynet()
+    #test_tiled_keynet()
+    #test_permutation_keynet()
+    #test_photometric_keynet()
     
     #test_keynet_scipy()    
     

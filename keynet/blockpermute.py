@@ -40,14 +40,15 @@ def hierarchical_block_permute(img, blockshape, permute_at_level, min_blocksize=
             img_permuted = np.rot90(img_permuted, k=twist_direction)
         else:
             img_permuted = block_permute(img_permuted, cropshape, seed=None)  # seed must be None
+
     for i in range(0, img.shape[0], cropshape[0]):
         for j in range(0, img.shape[1], cropshape[1]):
             subimg = img_permuted[i:i+cropshape[0], j:j+cropshape[1]]
-            if min(cropshape) > min_blocksize:
+            if min(cropshape) >= min_blocksize and max(permute_at_level) > 0:
                 subimg_permuted = hierarchical_block_permute(subimg, blockshape, permute_at_level=np.array(permute_at_level)-1, seed=None, min_blocksize=min_blocksize, twist=twist)  # seed must be None
                 img_permuted[i:i+cropshape[0], j:j+cropshape[1]] = subimg_permuted
             elif max(permute_at_level) > 0:
-                raise ValueError('Recursive blockshape=%s <= minimum blockshape=%d' % (subimg.shape[0:2], min_blocksize)) 
+                raise ValueError('Recursive blockshape=%s < minimum blockshape=%d' % (subimg.shape[0:2], min_blocksize)) 
     return img_permuted
 
 
