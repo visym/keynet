@@ -3,7 +3,7 @@ import numpy as np
 
 
 def block_permute(img, cropshape, seed=None):
-    """For every non-overlapping subimg in img of size (H,W)=cropshape, randomly permute the blocks, preserving the order within the block"""
+    """For every non-overlapping subimg in img of size (H,W)=cropshape, randomly permute the blocks, preserving the order and channels within the block"""
     assert img.shape[0] % cropshape[0] == 0 and img.shape[1] % cropshape[1] == 0, "Blocksize must be evenly divisible with image shape"
     if seed is not None:
         np.random.seed(seed)
