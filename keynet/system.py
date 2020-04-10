@@ -248,13 +248,15 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         (G, Ginv) = sparse_permutation_matrix(N, withinverse=True)
     elif global_geometric == 'hierarchical_permutation':
         assert hierarchical_blockshape is not None and hierarchical_permute_at_level is not None
-        (A, Ainv) = keynet.sparse.sparse_channelorder_to_pixelorder_matrix((channels, height, width), withinverse=True)  # TESTING
+        hierarchical_permute_at_level = hierarchical_permute_at_level if max(height,width)/np.power(2, max(hierarchical_permute_at_level)) >= 8 else []
+        (A, Ainv) = keynet.sparse.sparse_channelorder_to_pixelorder_matrix((channels, height, width), withinverse=True) 
         (G, Ginv) = hierarchical_block_permutation_matrix((height, width, channels), hierarchical_blockshape, hierarchical_permute_at_level, min_blocksize=8, seed=seed, twist=False, withinverse=True)
         (G, Ginv) = (Ainv.dot(G).dot(A), Ainv.dot(Ginv).dot(A))  # CxHxW -> HxWxC -> hierarchical permute in HxWxC order -> CxHxW
         if memoryorder != 'channel':
             (G, Ginv) = (c.dot(G).dot(cinv), c.dot(Ginv).dot(cinv))        
     elif global_geometric == 'hierarchical_rotation':
         assert hierarchical_blockshape is not None and hierarchical_permute_at_level is not None
+        hierarchical_permute_at_level = hierarchical_permute_at_level if max(height,width)/np.power(2, max(hierarchical_permute_at_level)) >= 8 else []
         (A, Ainv) = keynet.sparse.sparse_channelorder_to_pixelorder_matrix((channels, height, width), withinverse=True)                
         (G, Ginv) = hierarchical_block_permutation_matrix((height, width, channels), hierarchical_blockshape, hierarchical_permute_at_level, min_blocksize=8, seed=seed, twist=True, withinverse=True)
         (G, Ginv) = (Ainv.dot(G).dot(A), Ainv.dot(Ginv).dot(A))  # CxHxW -> HxWxC -> hierarchical permute in HxWxC order -> CxHxW

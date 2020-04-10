@@ -26,6 +26,8 @@ def hierarchical_block_permute(img, blockshape, permute_at_level, min_blocksize=
          -twist:  restrict the permutation at each level to a rotation only
          -min_blocksize:  the smallest dimension of any block
     """
+    if len(permute_at_level) == 0:
+        return np.copy(img)
 
     assert img.shape[0] % blockshape[0] == 0 and img.shape[1] % blockshape[1] == 0, "Recursive image size %s and block layout %s must be divisible" % (str(img.shape[0:2]), str(blockshape))
     imgsize = (img.shape[0], img.shape[1])
@@ -41,6 +43,8 @@ def hierarchical_block_permute(img, blockshape, permute_at_level, min_blocksize=
         else:
             img_permuted = block_permute(img_permuted, cropshape, seed=None)  # seed must be None
 
+    if len(permute_at_level)==1 and all(permute_at_level == [0]):
+        return img_permuted
     for i in range(0, img.shape[0], cropshape[0]):
         for j in range(0, img.shape[1], cropshape[1]):
             subimg = img_permuted[i:i+cropshape[0], j:j+cropshape[1]]

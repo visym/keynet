@@ -258,10 +258,10 @@ def test_vgg16_orthogonal():
 
 
 if __name__ == '__main__':
-    #test_identity_keynet()
-    #test_tiled_keynet()
-    #test_permutation_keynet()
-    #test_photometric_keynet()
+    test_identity_keynet()
+    test_tiled_keynet()
+    test_permutation_keynet()
+    test_photometric_keynet()
     
     #test_keynet_scipy()    
     
@@ -269,6 +269,6 @@ if __name__ == '__main__':
     #test_memory_order()
     #test_keynet_mnist()
 
-    #test_vgg16()
+    test_vgg16()
     #test_vgg16_stochastic()
-    test_vgg16_orthogonal()
+    #test_vgg16_orthogonal()

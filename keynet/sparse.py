@@ -585,8 +585,9 @@ class DiagonalTiledMatrix(TiledMatrix):
         """Construct block diagonal matrix from block B repeated down the main diagonal"""
         assert B.ndim == 2, "Invalid block, must be 2D"
         assert isinstance(shape, tuple) and len(shape) == 2, "invalid shape"
-        assert shape[0] >= B.shape[0] and shape[1] >= B.shape[1]
-        
+        if B.shape[0] > shape[0] or B.shape[1] > shape[1]:
+            B = B.tocsr()[0:shape[0], 0:shape[1]]
+
         self._tileshape = B.shape
         self.shape = shape
         self.dtype = B.dtype
@@ -662,3 +663,8 @@ class Conv2dTiledMatrix(TiledMatrix):
                     b = self._tiles[k + k_tileoffset + sk*(ni*Nj+nj)]  # new tiles, repeated structure
                     yield (i + si*ni, j + sj*nj, b)  # offset = stride*repetitions
                     
+    def torchdot(self, x):
+        """TESTING:  expand then multiply"""
+        print('torchdot')
+        print(self)
+        return torch.as_tensor(self.tocoo().dot(x.detach().numpy()).astype(np.float32))
