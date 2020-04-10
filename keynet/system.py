@@ -146,6 +146,7 @@ class KeyedSensor(keynet.layer.KeyedLayer):
         return self
 
     def fromimage(self, im):
+        im = im.resize(self._inshape[2], self._inshape[3])
         assert (1, im.channels(), im.height(), im.width()) == self._inshape        
         self._im = im
         self._tensor = im.float().torch().contiguous()
@@ -158,6 +159,8 @@ class KeyedSensor(keynet.layer.KeyedLayer):
 
     def astensor(self):
         return self._tensor
+    def totensor(self):
+        return self.astensor()
     
     def asimage(self):
         x_torch = self._tensor        
@@ -166,7 +169,9 @@ class KeyedSensor(keynet.layer.KeyedLayer):
             print(x_torch.shape)            
         im = self._im.fromtorch(x_torch).mat2gray()  # 1xCxHxW -> HxWxC
         return im.rgb() if im.iscolor() else im.lum()  # uint8
-
+    def toimage(self):
+        return self.asimage()
+    
     def keypair(self):
         return (self._encryptkey, self._decryptkey)
 
