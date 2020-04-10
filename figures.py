@@ -22,6 +22,7 @@ from keynet.mnist import LeNet, LeNet_AvgPool
 from keynet.cifar10 import AllConvNet
 import keynet.system
 import keynet.dense
+import keynet.globals
 
 
 def example_2x2():
@@ -343,14 +344,19 @@ def print_parameters():
     net.load_state_dict(torch.load('./models/cifar10_allconv.pth', map_location=torch.device('cpu')));
     print('[figures.print_parameters]:  allconvnet parameters=%d' % (keynet.torch.count_parameters(net)))
     
+    keynet.globals.num_processes(48)
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)    
     print('[figures.print_parameters]:  IdentityKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))
 
+    keynet.globals.num_processes(48)
     (sensor, knet) = keynet.system.PermutationKeynet(inshape, net)    
     print('[figures.print_parameters]:  PermutationKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))
 
-    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, 8)
-    print('[figures.print_parameters]:  TiledPermutationKeynet-8 (allconvnet) parameters=%d' % (knet.num_parameters()))        
+    keynet.globals.num_processes(48)
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 8)
+    print('[figures.print_parameters]:  TiledIdentityKeynet-8 (allconvnet) parameters=%d' % (knet.num_parameters()))        
+
+    return (sensor, knet)
 
 if __name__ == '__main__':
     print_parameters()

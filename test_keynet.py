@@ -211,30 +211,33 @@ def test_keynet_mnist():
 
     
 def test_vgg16():
+
+    inshape = (3,224,224)
+    x = torch.randn(1, *inshape)
+    net = keynet.vgg.VGG16()
+    print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
+
     keynet.globals.num_processes(48)
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 224//4)
+    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    print('vgg16: keynet-56 num parameters=%d' % knet.num_parameters())
+
+
+def test_vgg16_orthogonal():
+    inshape = (3,224,224)
+    x = torch.randn(1, *inshape)
     net = keynet.vgg.VGG16()
     print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
-    (sensor, model) = keynet.system.TiledIdentityKeynet( (3, 224, 224), net, 224//4)
-    #(sensor, model) = keynet.system.IdentityKeynet( (3, 224, 224), net, backend=None)
-    print('vgg16: keynet-56 num parameters=%d' % model.num_parameters())
 
-
-def test_vgg16_permutation():
-    keynet.globals.num_processes(48)    
-    net = keynet.vgg.VGG16()
-    print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
-    (sensor, model) = keynet.system.TiledPermutationKeynet( (3, 224, 224), net, 32)
-    print('vgg16: keynet num parameters=%d' % model.num_parameters())
-    print(vipy.util.save((sensor, model), 'keynet_vgg16_tiled_permutation.pkl'))
-
-
-def test_vgg16_stochastic():
-    keynet.globals.num_processes(48)    
-    net = keynet.vgg.VGG16()
-    print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
-    (sensor, model) = keynet.system.TiledStochasticKeynet( (3, 224, 224), net, 32, alpha=2, beta=1.0)
-    print('vgg16: keynet num parameters=%d' % model.num_parameters())
-    print(vipy.util.save((sensor, model), 'keynet_vgg16_tiled_stochastic_alpha%d_tile%d.pkl' % (2, 32)))
+    keynet.globals.num_processes(48)
+    (sensor, knet) = keynet.system.Keynet(inshape, net, tileshape=(224//4, 224//4), 
+                                          global_geometric='hierarchical_permutation', hierarchical_blockshape=(2,2), hierarchical_permute_at_level=(0,1,2),
+                                          local_geometric='givens_orthogonal', alpha=2.0, blocksize=224//4,
+                                          local_photometric='uniform_random_affine', beta=1.0, gamma=1.0,
+                                          memoryorder='channel')
+                                          
+    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    print('vgg16: keynet-orthogonal-56 num parameters=%d' % knet.num_parameters())
 
 
 if __name__ == '__main__':
@@ -249,4 +252,5 @@ if __name__ == '__main__':
     #test_memory_order()
     #test_keynet_mnist()
     #test_vgg16_permutation()
-    test_vgg16()
+    #test_vgg16()
+    test_vgg16_orthogonal()

@@ -371,6 +371,8 @@ def TiledPermutationKeynet(inshape, net, tilesize):
     return Keynet(inshape, net, global_geometric='permutation', backend='scipy', tileshape=(tilesize, tilesize))
 
 
+
+
 def OpticalFiberBundleKeynet(inshape, net):
     f_keypair = keygen('identity', 'scipy')  # FIXME
     sensor = OpticalFiberBundle(inshape, f_keypair('input', inshape))
