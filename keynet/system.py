@@ -229,7 +229,7 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
     allowable_memoryorder = set(['channel', 'block'])
     allowable_global_geometric = set(['identity', 'permutation', 'hierarchical_permutation', 'hierarchical_rotation', 'givens_orthogonal'])    
     allowable_local_geometric = set(['identity', 'permutation', 'doubly_stochastic', 'givens_orthogonal'])
-    allowable_photometric = set(['identity', 'uniform_random_gain', 'uniform_random_affine', 'uniform_random_bias', 'constant_bias', 'linear_bias'])
+    allowable_photometric = set(['identity', 'uniform_random_gain', 'uniform_random_affine', 'uniform_random_bias', 'constant_bias', 'linear_bias', 'blockwise_constant_bias'])
 
     (channels, height, width) = shape
     blocknumel = blocksize*blocksize if blocksize is not None else None
@@ -301,7 +301,7 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         (P, Pinv) = (sparse_affine_to_linear(sparse_identity_matrix(N)), sparse_affine_to_linear(sparse_identity_matrix(N)))
     elif global_photometric == 'uniform_random_gain':
         assert beta is not None and beta > 0
-        (P, Pinv) = sparse_uniform_random_diagonal_matrix(N, beta, withinverse=True)
+        (P, Pinv) = sparse_uniform_random_diagonal_matrix(N, beta, bias=1, withinverse=True)
         (P, Pinv) = (sparse_affine_to_linear(P), sparse_affine_to_linear(Pinv))
     elif global_photometric == 'uniform_random_bias':
         assert gamma is not None and gamma > 0
@@ -311,8 +311,13 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         (P, Pinv) = diagonal_affine_to_linear(sparse_identity_matrix(N), (gamma/float(N))*np.array(range(0,N)).reshape(N,1), withinverse=True)
     elif global_photometric == 'uniform_random_affine':
         assert beta is not None and beta > 0 and gamma is not None and gamma > 0
-        P = sparse_uniform_random_diagonal_matrix(N, beta)
+        P = sparse_uniform_random_diagonal_matrix(N, beta, bias=1)
         (P, Pinv) = diagonal_affine_to_linear(P, gamma*np.random.rand(N,1), withinverse=True)
+    elif global_photometric == 'blockwise_constant_bias':
+        assert gamma is not None and gamma > 0
+        assert blocksize is not None
+        bias = gamma*np.random.rand(int(np.ceil(N//blocksize)), 1).dot(np.ones( (1, blocknumel))).flatten()[0:N].reshape(N,1)
+        (P, Pinv) = diagonal_affine_to_linear(sparse_identity_matrix(N), bias, withinverse=True)        
     else:
         raise ValueError("Invalid global photometric transform '%s' - must be in '%s'" % (global_photometric, str(allowable_photometric)))                
 
@@ -320,22 +325,24 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         (p, pinv) = (sparse_affine_to_linear(sparse_identity_matrix(N)), sparse_affine_to_linear(sparse_identity_matrix(N)))
     elif local_photometric == 'uniform_random_gain':
         assert blocksize is not None
-        assert beta is not None and beta > 0        
-        (p, pinv) = sparse_uniform_random_diagonal_matrix(blocknumel, beta, withinverse=True)
+        assert beta is not None and beta > 0
+        (p, pinv) = sparse_uniform_random_diagonal_matrix(blocknumel, beta, bias=1, withinverse=True)
         (p, pinv) = (sparse_block_diagonal(p, shape=(N,N)), sparse_block_diagonal(pinv, shape=(N,N)))
         (p, pinv) = (sparse_affine_to_linear(p), sparse_affine_to_linear(pinv))
     elif local_photometric == 'uniform_random_bias':
         # FIXME: local bias does not respect memoryorder
         assert blocksize is not None 
         assert gamma is not None and gamma > 0
-        bias = np.repeat(gamma*np.random.rand(blocknumel, 1), np.ceil(N / blocknumel))[0:N].reshape(N,1)
+        bias = np.tile(gamma*np.random.rand(blocknumel), int(np.ceil(N / blocknumel)))[0:N].reshape(N,1)
         (p, pinv) = diagonal_affine_to_linear(sparse_identity_matrix(N), bias=bias, withinverse=True)        
     elif local_photometric == 'uniform_random_affine':
         assert blocksize is not None 
         assert beta is not None and beta > 0 and gamma is not None and gamma > 0
-        p = sparse_uniform_random_diagonal_matrix(blocknumel, beta)
-        bias = np.repeat(gamma*np.random.rand(blocknumel, 1), np.ceil(N / blocknumel))[0:N].reshape(N,1)        
+        p = sparse_uniform_random_diagonal_matrix(blocknumel, beta, bias=1)
+        bias = np.tile(gamma*np.random.rand(blocknumel), int(np.ceil(N / blocknumel)))[0:N].reshape(N,1)
         (p, pinv) = diagonal_affine_to_linear(sparse_block_diagonal(p, shape=(N,N)), bias=bias, withinverse=True)
+    elif local_photometric == 'blockwise_constant_bias':
+        raise ValueError('blockwise_constant_bias supported for global_photometric testing only')
     else:
         raise ValueError("Invalid local photometric transform '%s' - must be in '%s'" % (local_photometric, str(allowable_photometric)))                
     

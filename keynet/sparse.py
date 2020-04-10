@@ -278,9 +278,9 @@ def sparse_gaussian_random_diagonal_matrix(n, mu=1, sigma=1, eps=1E-6, withinver
     return (D.astype(dtype), scipy.sparse.diags(1.0 / D.diagonal()).astype(dtype))if withinverse else D.astype(dtype)
 
 
-def sparse_uniform_random_diagonal_matrix(n, scale=1, eps=1E-6, dtype=np.float32, withinverse=False):
-    """nxn diagonal matrix with diagonal entries sampled from scale*[0,1]+eps"""
-    D = scipy.sparse.diags(np.array(scale*np.random.rand(n) + eps))
+def sparse_uniform_random_diagonal_matrix(n, scale=1, bias=0, eps=1E-6, dtype=np.float32, withinverse=False):
+    """nxn diagonal matrix with diagonal entries sampled from scale*[0,1]+eps+bias"""
+    D = scipy.sparse.diags(np.array(scale*np.random.rand(n) + eps + bias))
     return (D.astype(dtype), scipy.sparse.diags(1.0 / D.diagonal()).astype(dtype)) if withinverse else D.astype(dtype)
 
 
