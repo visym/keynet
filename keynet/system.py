@@ -163,7 +163,6 @@ class KeyedSensor(keynet.layer.KeyedLayer):
         x_torch = self._tensor        
         if self.isencrypted():
             x_torch = keynet.torch.linear_to_affine(x_torch, self._inshape)
-            print(x_torch.shape)            
         im = self._im.fromtorch(x_torch).mat2gray()  # 1xCxHxW -> HxWxC
         return im.rgb() if im.iscolor() else im.lum()  # uint8
 
