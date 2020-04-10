@@ -223,7 +223,7 @@ def test_vgg16():
     print('vgg16: keynet-56 num parameters=%d' % knet.num_parameters())
 
 
-def test_vgg16_orthogonal():
+def test_vgg16_stochastic():
     inshape = (3,224,224)
     x = torch.randn(1, *inshape)
     net = keynet.vgg.VGG16()
@@ -232,6 +232,23 @@ def test_vgg16_orthogonal():
     keynet.globals.num_processes(48)
     (sensor, knet) = keynet.system.Keynet(inshape, net, tileshape=(224//4, 224//4), 
                                           global_geometric='hierarchical_permutation', hierarchical_blockshape=(2,2), hierarchical_permute_at_level=(0,1,2),
+                                          local_geometric='doubly_stochastic', alpha=2.0, blocksize=224//4,
+                                          local_photometric='uniform_random_affine', beta=1.0, gamma=1.0,
+                                          memoryorder='channel')
+                                          
+    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    print('vgg16: keynet-orthogonal-56 num parameters=%d' % knet.num_parameters())
+
+
+def test_vgg16_orthogonal():
+    inshape = (3,224,224)
+    x = torch.randn(1, *inshape)
+    net = keynet.vgg.VGG16()
+    print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
+
+    keynet.globals.num_processes(48)
+    (sensor, knet) = keynet.system.Keynet(inshape, net, tileshape=(224//4, 224//4), 
+                                          global_geometric='hierarchical_permutation', hierarchical_blockshape=(2,2), hierarchical_permute_at_level=(0,1),
                                           local_geometric='givens_orthogonal', alpha=2.0, blocksize=224//4,
                                           local_photometric='uniform_random_affine', beta=1.0, gamma=1.0,
                                           memoryorder='channel')
@@ -241,16 +258,17 @@ def test_vgg16_orthogonal():
 
 
 if __name__ == '__main__':
-    #test_identity_keynet()
-    #test_tiled_keynet()
-    #test_permutation_keynet()
-    #test_photometric_keynet()
+    test_identity_keynet()
+    test_tiled_keynet()
+    test_permutation_keynet()
+    test_photometric_keynet()
     
     #test_keynet_scipy()    
     
     #test_vgg16_stochastic()
     #test_memory_order()
     #test_keynet_mnist()
-    #test_vgg16_permutation()
+
     #test_vgg16()
+    #test_vgg16_stochastic()
     test_vgg16_orthogonal()

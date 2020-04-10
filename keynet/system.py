@@ -275,7 +275,8 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         g = keynet.sparse.DiagonalTiledMatrix(sparse_permutation_matrix(blocknumel), shape=(N,N)).tocoo().astype(np.float32)
         ginv = g.transpose()
     elif local_geometric == 'doubly_stochastic':
-        assert blocksize is not None and blocksize < 4096 and alpha is not None
+        assert blocksize is not None and alpha is not None
+        assert blocksize < 8192, "Blocksize %d must be less than 8192, since doubly_stochastic requires the direct inverse of a dense matrix" % blocksize
         (g, ginv) = sparse_random_diagonally_dominant_doubly_stochastic_matrix(blocknumel, int(alpha), withinverse=True)  # expensive inverse
         g = keynet.sparse.DiagonalTiledMatrix(g, shape=(N,N)).tocoo()
         ginv = keynet.sparse.DiagonalTiledMatrix(ginv, shape=(N,N)).tocoo()

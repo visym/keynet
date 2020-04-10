@@ -63,7 +63,7 @@ class KeyedLayer(nn.Module):
         else:
             raise ValueError('unsupported layer type "%s"' % str(type(module)))
         
-        if not isinstance(self.W, SparseMatrix):
+        if not isinstance(self.W, SparseMatrix) or not isinstance(self.W, keynet.sparse.SparseMatrix):
             self.W = SparseMatrix(self.W)
             
     def extra_repr(self):
