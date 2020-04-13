@@ -5,7 +5,7 @@ import numpy as np
 import keynet.torch
 import keynet.sparse
 from keynet.torch import affine_to_linear, linear_to_affine
-from keynet.torch import affine_to_linear_matrix, scipy_coo_to_torch_sparse
+from keynet.torch import affine_to_linear_matrix
 from keynet.sparse import is_scipy_sparse, sparse_toeplitz_avgpool2d, sparse_toeplitz_conv2d, SparseMatrix
 import vipy
 from keynet.globals import GLOBAL, verbose

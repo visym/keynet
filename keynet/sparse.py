@@ -21,6 +21,24 @@ import itertools
 import tempfile
 
 
+
+def scipy_coo_to_torch_sparse(coo, device='cpu'):
+    """https://stackoverflow.com/questions/50665141/converting-a-scipy-coo-matrix-to-pytorch-sparse-tensor"""
+
+    values = coo.data
+    indices = np.vstack((coo.row, coo.col))
+    
+    i = torch.LongTensor(indices)
+    v = torch.FloatTensor(values)
+    shape = coo.shape
+
+    if device == 'cpu':
+        return torch.sparse.FloatTensor(i, v, torch.Size(shape))
+    else:
+        with torch.cuda.device(device):
+            return torch.sparse.FloatTensor(i, v, torch.Size(shape)).cuda(device)
+
+
 def sparse_channelorder_to_pixelorder_matrix(shape, withinverse=False):
     """Return permutation matrix that will convert an image in CxHxW memory layout (channel order) to HxWxC memory layout (pixel order)"""
     (C,H,W) = shape 
@@ -513,7 +531,8 @@ class TiledMatrix(SparseMatrix):
         self._tiles = []
         self._blocks = []
         for ((bi,bj), ijv) in d_blockidx_to_tile.items():
-            blockshape = tileshape if ((bi*h + h) <= H) and ((bj*w + w) <= W) else (H-bi*h, W-bj*w)
+            blockshape = (tileshape[0] if ((bi*h + h) <= H) else (H-bi*h),
+                          tileshape[1] if ((bj*w + w) <= W) else (W-bj*w))
             blockhash = hash(str(sorted(ijv, key=lambda x: (x[0], x[1])))+str(blockshape))
             if blockhash not in d_blockhash_to_index:
                 (row, col, val) = zip(*ijv)
@@ -528,7 +547,7 @@ class TiledMatrix(SparseMatrix):
 
     def __iter__(self):
         for (i,j,k) in self._blocks:
-            yield (i, j, self._tiles[k])
+            yield (i, j, k)
         
     def _tiletype(self, B):
         return SparseMatrix(B.astype(np.float32))
@@ -551,55 +570,69 @@ class TiledMatrix(SparseMatrix):
         self._tiles = tiles
         return self
 
-    @staticmethod
-    def _torchdot(x, rowrange, blocks, tiles):
-        pass
+    def _torchdot(self, x):
+        # FIXME: Too slow
+        (h,w) = self._tileshape
+        (H,W) = self.shape
+        y = torch.zeros((H, x.shape[1])).type(torch.FloatTensor)  # device?
+        for (i, j, k) in self.__iter__():
+            b = self._tiles[k]
+            (H_clip, W_clip) = (i+b.shape[0], j+b.shape[1])
+            y[i:H_clip, :] += b.torchdot(x[j:W_clip, :])
+        return y
 
-    def torchdot(self, x, rowrange=None):
+    def torchdot(self, x):
         """Input is (C*H*W+1)xN tensor, compute right matrix multiplication T*x, return (-1)xN"""
         assert self.shape[1] == x.shape[0], "Non-conformal shape for W=%s, x=%s" % (str(self.shape), str(x.shape))
 
-        if not self.is_numpy_dense(x):
-            x = x.detach().numpy()
+        if keynet.globals.backend() == 'torch':
 
-        if keynet.globals.num_processes() > 1 and rowrange is None:
+            torch.set_grad_enabled(False)
+            cuda = torch.device('cuda')
+
             (H,W) = self.shape
-            n_processes = keynet.globals.num_processes()
-            di = H // n_processes
+            (h,w) = self._tileshape
+            y = torch.zeros((H, x.shape[1])).type(torch.FloatTensor).to(device=cuda)  # device?
+            tiles = [scipy_coo_to_torch_sparse(b.tocoo()).to(device=cuda) for b in self._tiles]  # torch conversion
+            x = x.to(device=cuda)
 
-            from dask.distributed import Client, wait, as_completed
-            with Client(name='keynet',
-                        scheduler_port=0,
-                        dashboard_address=None,
-                        processes=True,
-                        threads_per_worker=1,
-                        n_workers=n_processes,
-                        direct_to_workers=True,
-                        local_directory=tempfile.mkdtemp()) as client:
+            #yv = y.t().unfold(0, h, h)
+            #xv = x.t().unfold(0, w, w)
 
-                x_scatter = client.scatter(x, broadcast=True)
-                obj = client.scatter(self.clone(), broadcast=True)
-                results = [client.submit(lambda i: obj.result().torchdot(x_scatter.result(), (i, min(i+di, H))), i) for i in range(0, H, di)]
+            # https://github.com/chrischoy/pytorch-custom-cuda-tutorial
 
-                y = None
-                for (f,r) in as_completed(results, with_results=True):
-                    y = (y+r) if y is not None else r
+            yv = {i:y[i:i+h, :] for i in range(0,H,h)}
+            xv = {j:x[j:j+w, :] for j in range(0,W,w)}
+            for (kk, (i, j, k)) in enumerate(self.__iter__()):
+                b = tiles[k]
+                if b.shape[0] == h and b.shape[1] == w and i in yv and j in xv:
+                    yv[i] += torch.sparse.mm(b, xv[j])
+                else:
+                    y[i:i+b.shape[0], :] += torch.sparse.mm(b, x[j:j+b.shape[1], :])
+            
+                if kk % 100000 == 0:
+                    print(kk)
+            return y.type(torch.FloatTensor).to('cpu')
 
-            return torch.as_tensor(y)
-        
-        W = self.tocsr(rowrange=rowrange)   # very slow for large matrices
-        y = W.dot(x).astype(np.float32)  # MKL multi-threaded with scipy-intel package
-        y = y if rowrange is not None else torch.as_tensor(y)  # avoid passing around torch tensors with joblib due to semaphores
+            #client = keynet.globals.dask_client()
+            #x_scatter = client.scatter(x, broadcast=True)
+            #obj = client.scatter(self.clone(), broadcast=True)
+            #results = [client.submit(lambda x: ((x,  min(x+di, H)), obj.result().torchdot(x_scatter.result(), (x, min(x+di, H)))), i) for i in range(0, H, di)]
 
-        # FIXME: Too slow
-        #(h,w) = self._tileshape
-        #(H,W) = self.shape
-        #y = torch.zeros((H, x.shape[1])).type(torch.FloatTensor)  # device?
-        #for (i, j, b) in self.__iter__():
-        #    (H_clip, W_clip) = (i+b.shape[0], j+b.shape[1])
-        #    y[i:H_clip, :] += b.torchdot(x[j:W_clip, :])
+            #y = np.zeros( (H, x.shape[1]), dtype=np.float32)
+            #from dask.distributed import as_completed
+            #for (f, ((ib,ie),r)) in as_completed(results, with_results=True):
+            #    y[ib:ie,:] = r
 
-        return y
+            #return torch.as_tensor(y)
+
+        else:
+            if not self.is_numpy_dense(x):
+                x = x.detach().numpy()
+
+            W = self.tocsr()   # very slow for large matrices
+            y = W.dot(x).astype(np.float32)  # MKL multi-threaded with scipy-intel package
+            return torch.as_tensor(y)  
                 
     def transpose(self):
         self._blocks = [(j,i,k) for (i,j,k) in self._blocks] if self._blocks is not None else self._blocks
@@ -608,20 +641,17 @@ class TiledMatrix(SparseMatrix):
         self.shape = (self.shape[1], self.shape[0])
         return self
     
-    def tosparse(self, rowrange=None, format='coo'):
+    def tosparse(self, format='coo'):
         """Convert to Scipy COOrdinate sparse matrix, this is an expensive operation that should be used for small matrices only and for testing purposes"""
         ((H,W), (h,w)) = (self.shape, self._tileshape)
-        C = self.clone()
-        C._tiles = [t.tocoo() for t in C._tiles]  # preconvert
+        tiles = [t.tocoo() for t in self._tiles]  # preconvert, expensive for small range
 
-        (ib, ie) = rowrange if rowrange is not None else (0, H)
         (rows, cols, vals) = ([],[],[])
-        for (ii, jj, b) in C.__iter__():
-            if ii >= ib and ii < ie:
-                for (i,j,v) in zip(b.row, b.col, b.data):
-                    rows.append(int(i)+ii)
-                    cols.append(int(j)+jj)
-                    vals.append(float(v))
+        for (ii, jj, k) in self.__iter__():
+            b = tiles[k]
+            rows.extend(ii + b.row)
+            cols.extend(jj + b.col)
+            vals.extend(b.data)
 
         if format == 'csr':
             T = scipy.sparse.csr_matrix( (vals, (rows, cols)), shape=(H,W))
@@ -633,11 +663,11 @@ class TiledMatrix(SparseMatrix):
             raise ValueError('Invalid format "%s" - must be ["coo", "csr", "csc"]' % format)
         return T            
 
-    def tocsr(self, rowrange=None):
-        return self.tosparse(rowrange, format='csr')
+    def tocsr(self):
+        return self.tosparse(format='csr')
 
-    def tocoo(self, rowrange=None):
-        return self.tosparse(rowrange, format='coo')
+    def tocoo(self):
+        return self.tosparse(format='coo')
     
     def nnz(self):
         return sum([t.nnz() for t in self._tiles])
@@ -672,7 +702,7 @@ class DiagonalTiledMatrix(TiledMatrix):
         """Iterator for ((bi,bj), b) tuples along diagonal"""
         ((H,W), (h,w)) = (self.shape, self._tileshape)
         for (i, j) in zip(range(0, H, h), range(0, W, w)):
-            yield (i, j, self._tiles[0]) if (i+h<H and j+w<W) else (i, j, self._tiles[-1])
+            yield (i, j, 0) if (i+h<H and j+w<W) else (i, j, len(self._tiles))
 
 
 class Conv2dTiledMatrix(TiledMatrix):    
@@ -705,6 +735,7 @@ class Conv2dTiledMatrix(TiledMatrix):
                 C = T[ib:ie, jb:je]
                 if (cout == 0 and cin == 0):
                     C = TiledMatrix(C, tileshape)
+
                     self._tiles = C._tiles  # unique per channel
                     self._uniqueblocks = [v[0] for (k,v) in groupbyasdict(C._blocks, lambda x: x[2]).items()]                    
                     self._blocks = [(i, j, k, (Hout*Wout, Hin*Win, len(self._tiles)), (Cout, Cin), 0) for (i,j,k) in C._blocks]  # repeated with stride                    
@@ -727,6 +758,6 @@ class Conv2dTiledMatrix(TiledMatrix):
         for (i, j, k, (si,sj,sk), (Ni,Nj), k_tileoffset) in self._blocks:
             for ni in range(0, Ni):  # row repetition 
                 for nj in range(0, Nj):  # col repetition 
-                    b = self._tiles[k + k_tileoffset + sk*(ni*Nj+nj)]  # new tiles, repeated structure
-                    yield (i + si*ni, j + sj*nj, b)  # offset = stride*repetitions
+                    #b = self._tiles[k + k_tileoffset + sk*(ni*Nj+nj)]  # new tiles, repeated structure
+                    yield (i + si*ni, j + sj*nj, k + k_tileoffset + sk*(ni*Nj+nj))  # offset = stride*repetitions
                     

@@ -1,3 +1,4 @@
+import sys
 import numpy as np
 import scipy.linalg
 import PIL
@@ -217,10 +218,12 @@ def test_vgg16():
     net = keynet.vgg.VGG16()
     print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
 
-    keynet.globals.num_processes(48)
-    #(sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 224//4)
-    #print(vipy.util.save((sensor, knet), 'test_vgg16.pkl'))
-    (sensor, knet) = vipy.util.load('test_vgg16.pkl')
+    keynet.globals.num_processes(48, backend='joblib')
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 224//4)
+    print(vipy.util.save((sensor, knet), 'test_vgg16.pkl'))
+    #(sensor, knet) = vipy.util.load('test_vgg16.pkl')
+
+    #keynet.globals.num_processes(24, backend='dask')
     assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('vgg16: keynet-56 num parameters=%d' % knet.num_parameters())
 
@@ -248,13 +251,16 @@ def test_vgg16_orthogonal():
     net = keynet.vgg.VGG16()
     print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
 
-    keynet.globals.num_processes(48)
+
+    keynet.globals.num_processes(48, backend='joblib')
     (sensor, knet) = keynet.system.Keynet(inshape, net, tileshape=(224//4, 224//4), 
-                                          global_geometric='hierarchical_permutation', hierarchical_blockshape=(2,2), hierarchical_permute_at_level=(0,1),
+                                          global_geometric='hierarchical_permutation', hierarchical_blockshape=(2,2), hierarchical_permute_at_level=(0,1,2),
                                           local_geometric='givens_orthogonal', alpha=2.0, blocksize=224//4,
                                           local_photometric='uniform_random_affine', beta=1.0, gamma=1.0,
-                                          memoryorder='channel')
+                                          memoryorder='block')
+    print(vipy.util.save((sensor, knet), 'test_vgg16_orthogonal.pkl'))
                                           
+    keynet.globals.num_processes(48, backend='dask')
     assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('vgg16: keynet-orthogonal-56 num parameters=%d' % knet.num_parameters())
 
@@ -271,6 +277,8 @@ if __name__ == '__main__':
     #test_memory_order()
     #test_keynet_mnist()
 
-    test_vgg16()
-    #test_vgg16_stochastic()
-    #test_vgg16_orthogonal()
+    if sys.argv[1] == 'vgg16':
+        test_vgg16()
+    elif sys.argv[1] == 'vgg16-orthogonal':
+        #test_vgg16_stochastic()
+        test_vgg16_orthogonal()

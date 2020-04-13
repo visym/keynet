@@ -61,6 +61,9 @@ class KeyedModel(object):
                 # Replace module k_prev with fused weights
                 (m_prev.weight, m_prev.bias) = (torch.nn.Parameter(bn_weight), torch.nn.Parameter(bn_bias))
                 d_name_to_keyedmodule[k_prev] = f_module_to_keyedmodule(m_prev, netshape[k_prev]['inshape'], netshape[k]['outshape'], layerkey[k]['A'], layerkey[k_prev]['Ainv'])
+                if verbose():
+                    print('[keynet.layers.KeyNet]:     %s' % str(d_name_to_keyedmodule[k_prev]))
+                    print('[keynet.layers.KeyNet]:     %s' % str(d_name_to_keyedmodule[k]))
 
             elif isinstance(m, nn.ReLU):
                 # Apply key to previous layer (which was skipped) and make this layer identity
@@ -70,6 +73,9 @@ class KeyedModel(object):
                 B = layerkey[k]['A'].dot(layerkey[k]['Ainv'])
                 d_name_to_keyedmodule[k_prev] = f_module_to_keyedmodule(m_prev, netshape[k_prev]['inshape'], netshape[k_prev]['outshape'], B.dot(layerkey[k_prev]['A']), layerkey[k_prev]['Ainv'])                
                 d_name_to_keyedmodule[k] = copy.deepcopy(m)  # unkeyed
+                if verbose():
+                    print('[keynet.layers.KeyNet]:     %s' % str(d_name_to_keyedmodule[k_prev]))
+                    print('[keynet.layers.KeyNet]:     %s' % str(d_name_to_keyedmodule[k]))
 
             elif isinstance(m, nn.Dropout):    
                 pass  # identity matrix at test time, ignore me
@@ -78,6 +84,8 @@ class KeyedModel(object):
                 pass
             else:
                 d_name_to_keyedmodule[k] = f_module_to_keyedmodule(m, netshape[k]['inshape'], netshape[k]['outshape'], layerkey[k]['A'], layerkey[k]['Ainv'])
+                if verbose():
+                    print('[keynet.layers.KeyNet]:     %s' % str(d_name_to_keyedmodule[k]))
 
         self._keynet = nn.Sequential(d_name_to_keyedmodule)
         self._embeddingkey = layerkey['output']

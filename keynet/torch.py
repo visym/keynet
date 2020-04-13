@@ -88,21 +88,6 @@ def affine_to_linear_matrix(W_affine, bias=None):
     return W_linear
     
 
-def scipy_coo_to_torch_sparse(coo, device='cpu'):
-    """https://stackoverflow.com/questions/50665141/converting-a-scipy-coo-matrix-to-pytorch-sparse-tensor"""
-
-    values = coo.data
-    indices = np.vstack((coo.row, coo.col))
-    
-    i = torch.LongTensor(indices)
-    v = torch.FloatTensor(values)
-    shape = coo.shape
-
-    if device == 'cpu':
-        return torch.sparse.FloatTensor(i, v, torch.Size(shape))
-    else:
-        with torch.cuda.device(device):
-            return torch.sparse.FloatTensor(i, v, torch.Size(shape)).cuda(device)
 
 
 def torch_sparse_to_scipy_coo(t):
