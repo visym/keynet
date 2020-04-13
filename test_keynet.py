@@ -218,7 +218,9 @@ def test_vgg16():
     print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
 
     keynet.globals.num_processes(48)
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 224//4)
+    #(sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 224//4)
+    #print(vipy.util.save((sensor, knet), 'test_vgg16.pkl'))
+    (sensor, knet) = vipy.util.load('test_vgg16.pkl')
     assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('vgg16: keynet-56 num parameters=%d' % knet.num_parameters())
 

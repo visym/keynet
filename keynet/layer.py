@@ -8,7 +8,7 @@ from keynet.torch import affine_to_linear, linear_to_affine
 from keynet.torch import affine_to_linear_matrix, scipy_coo_to_torch_sparse
 from keynet.sparse import is_scipy_sparse, sparse_toeplitz_avgpool2d, sparse_toeplitz_conv2d, SparseMatrix
 import vipy
-from keynet.globals import GLOBAL
+from keynet.globals import GLOBAL, verbose
 import scipy.sparse
 
 
@@ -71,6 +71,8 @@ class KeyedLayer(nn.Module):
         return str('<%s, %s>' % (self._repr, str_shape))
 
     def forward(self, x_affine):
+        if verbose():
+            print('[keynet.layer]: forward %s' % str(self))
         y = self.W.torchdot(x_affine.t()).t()
         return y if not 'ReLU' in self._layertype else F.relu(y)
         

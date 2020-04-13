@@ -9,7 +9,7 @@ import torch.sparse
 from numpy.linalg import multi_dot 
 from collections import defaultdict
 from keynet.dense import random_positive_definite_matrix, random_doubly_stochastic_matrix
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, parallel_backend
 import warnings
 from tqdm import tqdm
 import xxhash
@@ -18,6 +18,7 @@ from vipy.util import groupbyasdict, flatlist, Stopwatch
 from keynet.util import blockview
 import keynet.globals
 import itertools
+import tempfile
 
 
 def sparse_channelorder_to_pixelorder_matrix(shape, withinverse=False):
@@ -490,7 +491,6 @@ class TiledMatrix(SparseMatrix):
             M = {k:np.array(), ...} a submatrix dictionary, such that the submatrix for block (i,j)=(B[u][0], B[u][1]) is M[B[u][2]]
         
         """
-        
         assert self.is_scipy_sparse(T), "input must be scipy.sparse.coo_matrix()"
         assert isinstance(tileshape, tuple) and len(tileshape)==2 and tileshape[0] > 0 and tileshape[1] > 0, "tileshape must be tuple (tileheight, tilewidth) > 0"
         
@@ -502,13 +502,13 @@ class TiledMatrix(SparseMatrix):
         T = T.tocoo()
         (h,w) = tileshape
         (H,W) = self.shape        
-
+            
         d_blockidx_to_tile = defaultdict(list)
         for (i,j,v) in zip(T.row, T.col, T.data):
             (ii,jj,vv) = (int(i), int(j), float(v))  # casting to native python types 
             (bi,bj) = (ii//h, jj//w)
             d_blockidx_to_tile[(bi, bj)].append( (ii-bi*h, jj-bj*w, vv) )
-
+                
         d_blockhash_to_index = dict()
         self._tiles = []
         self._blocks = []
@@ -546,16 +546,59 @@ class TiledMatrix(SparseMatrix):
         assert self.is_numpy_dense(x)
         return self.torchdot(torch.as_tensor(x)).numpy()
     
-    def torchdot(self, x):
+    def copy(self, blocks, tiles):
+        self._blocks = blocks
+        self._tiles = tiles
+        return self
+
+    @staticmethod
+    def _torchdot(x, rowrange, blocks, tiles):
+        pass
+
+    def torchdot(self, x, rowrange=None):
         """Input is (C*H*W+1)xN tensor, compute right matrix multiplication T*x, return (-1)xN"""
         assert self.shape[1] == x.shape[0], "Non-conformal shape for W=%s, x=%s" % (str(self.shape), str(x.shape))
+
+        if not self.is_numpy_dense(x):
+            x = x.detach().numpy()
+
+        if keynet.globals.num_processes() > 1 and rowrange is None:
+            (H,W) = self.shape
+            n_processes = keynet.globals.num_processes()
+            di = H // n_processes
+
+            from dask.distributed import Client, wait, as_completed
+            with Client(name='keynet',
+                        scheduler_port=0,
+                        dashboard_address=None,
+                        processes=True,
+                        threads_per_worker=1,
+                        n_workers=n_processes,
+                        direct_to_workers=True,
+                        local_directory=tempfile.mkdtemp()) as client:
+
+                x_scatter = client.scatter(x, broadcast=True)
+                obj = client.scatter(self.clone(), broadcast=True)
+                results = [client.submit(lambda i: obj.result().torchdot(x_scatter.result(), (i, min(i+di, H))), i) for i in range(0, H, di)]
+
+                y = None
+                for (f,r) in as_completed(results, with_results=True):
+                    y = (y+r) if y is not None else r
+
+            return torch.as_tensor(y)
         
-        (h,w) = self._tileshape
-        (H,W) = self.shape
-        y = torch.zeros((H, x.shape[1])).type(torch.FloatTensor)  # device?
-        for (i, j, b) in self.__iter__():
-            (H_clip, W_clip) = (i+b.shape[0], j+b.shape[1])
-            y[i:H_clip, :] += b.torchdot(x[j:W_clip, :])
+        W = self.tocsr(rowrange=rowrange)   # very slow for large matrices
+        y = W.dot(x).astype(np.float32)  # MKL multi-threaded with scipy-intel package
+        y = y if rowrange is not None else torch.as_tensor(y)  # avoid passing around torch tensors with joblib due to semaphores
+
+        # FIXME: Too slow
+        #(h,w) = self._tileshape
+        #(H,W) = self.shape
+        #y = torch.zeros((H, x.shape[1])).type(torch.FloatTensor)  # device?
+        #for (i, j, b) in self.__iter__():
+        #    (H_clip, W_clip) = (i+b.shape[0], j+b.shape[1])
+        #    y[i:H_clip, :] += b.torchdot(x[j:W_clip, :])
+
         return y
                 
     def transpose(self):
@@ -565,13 +608,37 @@ class TiledMatrix(SparseMatrix):
         self.shape = (self.shape[1], self.shape[0])
         return self
     
-    def tocoo(self):
+    def tosparse(self, rowrange=None, format='coo'):
         """Convert to Scipy COOrdinate sparse matrix, this is an expensive operation that should be used for small matrices only and for testing purposes"""
         ((H,W), (h,w)) = (self.shape, self._tileshape)
-        d = {(i, j):b.tocoo() for (i,j,b) in self.__iter__()}  # expensive
-        (rows, cols, vals) = zip(*[(int(i)+ii, int(j)+jj, float(v)) for ((ii,jj), b) in d.items() for (i,j,v) in zip(b.row, b.col, b.data)])
-        return scipy.sparse.coo_matrix( (vals, (rows, cols)), shape=(H,W))
+        C = self.clone()
+        C._tiles = [t.tocoo() for t in C._tiles]  # preconvert
 
+        (ib, ie) = rowrange if rowrange is not None else (0, H)
+        (rows, cols, vals) = ([],[],[])
+        for (ii, jj, b) in C.__iter__():
+            if ii >= ib and ii < ie:
+                for (i,j,v) in zip(b.row, b.col, b.data):
+                    rows.append(int(i)+ii)
+                    cols.append(int(j)+jj)
+                    vals.append(float(v))
+
+        if format == 'csr':
+            T = scipy.sparse.csr_matrix( (vals, (rows, cols)), shape=(H,W))
+        elif format == 'coo':
+            T = scipy.sparse.coo_matrix( (vals, (rows, cols)), shape=(H,W))
+        elif format == 'csc':
+            T = scipy.sparse.csc_matrix( (vals, (rows, cols)), shape=(H,W))
+        else:
+            raise ValueError('Invalid format "%s" - must be ["coo", "csr", "csc"]' % format)
+        return T            
+
+    def tocsr(self, rowrange=None):
+        return self.tosparse(rowrange, format='csr')
+
+    def tocoo(self, rowrange=None):
+        return self.tosparse(rowrange, format='coo')
+    
     def nnz(self):
         return sum([t.nnz() for t in self._tiles])
 
@@ -663,8 +730,3 @@ class Conv2dTiledMatrix(TiledMatrix):
                     b = self._tiles[k + k_tileoffset + sk*(ni*Nj+nj)]  # new tiles, repeated structure
                     yield (i + si*ni, j + sj*nj, b)  # offset = stride*repetitions
                     
-    def torchdot(self, x):
-        """TESTING:  expand then multiply"""
-        print('torchdot')
-        print(self)
-        return torch.as_tensor(self.tocoo().dot(x.detach().numpy()).astype(np.float32))
