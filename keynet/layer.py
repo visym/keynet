@@ -30,10 +30,10 @@ class KeyedLayer(nn.Module):
             self._repr = 'Conv2d: in_channels=%d, out_channels=%d, kernel_size=%s, stride=%s' % (module.in_channels, module.out_channels, str(module.kernel_size), str(stride))      
             sw = Stopwatch()
             self.W = sparse_toeplitz_conv2d(inshape, module.weight.detach().numpy(), bias=module.bias.detach().numpy(), stride=module.stride[0])            
-            print('[KeyedLayer]: sparse_toeplitz_conv2d=%f' % sw.since())
+            print('[KeyedLayer]: sparse_toeplitz_conv2d=%f seconds' % sw.since())
             sw = Stopwatch()
             self.W = A.dot(self.W).dot(Ainv)  # Key!            
-            print('[KeyedLayer]: conv2d dot=%f' % sw.since())
+            print('[KeyedLayer]: conv2d dot=%f seconds' % sw.since())
             if tileshape is not None:
                 self.W = keynet.sparse.Conv2dTiledMatrix(self.W, self._inshape, self._outshape, self._tileshape, bias=True)
             
@@ -49,10 +49,10 @@ class KeyedLayer(nn.Module):
             self._repr = 'AvgPool2d: kernel_size=%s, stride=%s' % (str(kernel_size), str(stride))
             sw = Stopwatch()
             self.W = sparse_toeplitz_avgpool2d(inshape, (inshape[0], inshape[0], kernel_size, kernel_size), stride)
-            print('[KeyedLayer]: sparse_toeplitz_conv2d=%f' % sw.since())
+            print('[KeyedLayer]: sparse_toeplitz_conv2d=%f seconds' % sw.since())
             sw = Stopwatch()
             self.W = A.dot(self.W).dot(Ainv) if A is not None else self.W.dot(Ainv)  # optional outkey
-            print('[KeyedLayer]: avgpool2d dot=%f' % sw.since())
+            print('[KeyedLayer]: avgpool2d dot=%f seconds' % sw.since())
             if tileshape is not None:
                 self.W = keynet.sparse.Conv2dTiledMatrix(self.W, self._inshape, self._outshape, self._tileshape, bias=True)
             
@@ -65,8 +65,7 @@ class KeyedLayer(nn.Module):
             raise ValueError('batchnorm layer should be named "mylayer_bn" for batchnorm of "mylayer" and should come right before "mylayer" to merge keyed layers')
             
         elif isinstance(module, nn.Dropout):
-            self._repr = 'Dropout: inshape=%s' % (str(inshape))
-            self.W = A.dot(Ainv)  # identity at test time, include because there may be ReLU following dropout
+            raise ValueError('dropout layer should be skipped during keying, and removed from final network')
             
         else:
             raise ValueError('unsupported layer type "%s"' % str(type(module)))

@@ -55,11 +55,14 @@ class KeyedModel(object):
                 assert '_bn' in k, "Batchnorm layers must be named 'mylayername_bn' for corresponding linear layer mylayername.  (e.g. 'conv3_bn')"
                 k_prev = k.split('_')[0]
                 assert netshape[k]['prevlayer'] == k_prev, "Batchnorm layer named 'mylayer_bn' must come right after 'mylayer' (e.g. 'conv3_bn' must come right after 'conv3')"
+
+                # Fuse batchnorm weights with previous layer (which was skipped)
                 m_prev = copy.deepcopy(getattr(net, k_prev))  # do not overwrite
                 (bn_weight, bn_bias) = keynet.torch.fuse_conv2d_and_bn(m_prev.weight, m_prev.bias,
                                                                        m.running_mean, m.running_var, 1E-5,
                                                                        m.weight, m.bias)
-                # Replace module k_prev with fused weights
+
+                # Replace module k_prev with fused weights, do not include batchnorm in final network
                 (m_prev.weight, m_prev.bias) = (torch.nn.Parameter(bn_weight), torch.nn.Parameter(bn_bias))
                 d_name_to_keyedmodule[k_prev] = f_module_to_keyedmodule(m_prev, netshape[k_prev]['inshape'], netshape[k]['outshape'], layerkey[k]['A'], layerkey[k_prev]['Ainv'])
                 if verbose():
@@ -67,22 +70,27 @@ class KeyedModel(object):
                     print('[keynet.layers.KeyNet]:     %s' % str(d_name_to_keyedmodule[k]))
 
             elif isinstance(m, nn.ReLU):
-                # Apply key to previous layer (which was skipped) and make this layer identity
+                # Apply key to previous layer (which was skipped) and make this layer unkeyed with ReLU only
                 k_prev = netshape[k]['prevlayer']
                 
                 m_prev = getattr(net, k_prev)
                 B = layerkey[k]['A'].dot(layerkey[k]['Ainv'])
                 d_name_to_keyedmodule[k_prev] = f_module_to_keyedmodule(m_prev, netshape[k_prev]['inshape'], netshape[k_prev]['outshape'], B.dot(layerkey[k_prev]['A']), layerkey[k_prev]['Ainv'])                
-                d_name_to_keyedmodule[k] = copy.deepcopy(m)  # unkeyed
+                d_name_to_keyedmodule[k] = copy.deepcopy(m)  # unkeyed, ReLU only
                 if verbose():
                     print('[keynet.layers.KeyNet]:     %s' % str(d_name_to_keyedmodule[k_prev]))
                     print('[keynet.layers.KeyNet]:     %s' % str(d_name_to_keyedmodule[k]))
 
             elif isinstance(m, nn.Dropout):    
-                pass  # identity matrix at test time, ignore me
-            elif netshape[k]['nextlayer'] is not None and (('%s_bn' % k) == netshape[k]['nextlayer'] or 'relu' in netshape[k]['nextlayer']):
-                # Wait to key this layer to merge with next layer 
-                pass
+                k_next = netshape[k]['nextlayer']
+                assert k_next is not None, "Dropout cannot be last layer"
+                layerkey[k_next]['Ainv'] = layerkey[k]['Ainv']  # propagate key to next layer
+                if verbose():
+                    print('[keynet.layers.KeyNet]:     Skipping %s and propagating key to %s' % (k, k_next))
+                pass  # Dropout is identity in final eval() network, so key assignment skips dropout and removes from network
+
+            elif netshape[k]['nextlayer'] is not None and (('%s_bn' % k) == netshape[k]['nextlayer'] or 'relu' in netshape[k]['nextlayer']):                
+                pass  # Key this layer by merging with next layer 
             else:
                 d_name_to_keyedmodule[k] = f_module_to_keyedmodule(m, netshape[k]['inshape'], netshape[k]['outshape'], layerkey[k]['A'], layerkey[k]['Ainv'])
                 if verbose():
@@ -359,7 +367,7 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
     sw = Stopwatch()
     A = Cinv.dot(p.dot(g.dot(P.dot(G.dot(C)))))
     Ainv = Cinv.dot(Ginv.dot(Pinv.dot(ginv.dot(pinv.dot(C)))))
-    print('[keygen]: dot=%f' % sw.since())
+    print('[keygen]: dot=%f seconds' % sw.since())
     return (A, Ainv)
 
 

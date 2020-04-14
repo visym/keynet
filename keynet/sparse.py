@@ -399,18 +399,12 @@ def spy(A, mindim=256, showdim=1024, range=None, eps=None):
     
 class SparseMatrix(object):
     def __init__(self, A=None):
-        self._n_processes = keynet.globals.num_processes()
         assert A is None or self.is_scipy_sparse(A) or self.is_numpy_dense(A), "Invalid input - %s" % (str(type(A)))
         self.shape = A.shape if A is not None else (0,0)  # shape=(H,W)
-        # self._matrix = A.tocsr() if self.is_scipy_sparse(A) else A
         self._matrix = A
         self.dtype = A.dtype if A is not None else None
         self.ndim = 2
 
-    def parallel(self, n_processes):
-        self._n_processes = n_processes
-        return self
-    
     def __repr__(self):
         return str('<keynet.SparseMatrix: H=%d, W=%d, backend=%s>' % (self.shape[0], self.shape[1], str(type(self._matrix))))
 
@@ -562,7 +556,8 @@ class TiledMatrix(SparseMatrix):
             yield (i, j, k)
         
     def _tiletype(self, B):
-        return SparseMatrix(B.astype(np.float32))
+        #return SparseMatrix(B.astype(np.float32))
+        return B.astype(np.float32)
     
     def tileshape(self):
         return self._tileshape
@@ -597,16 +592,13 @@ class TiledMatrix(SparseMatrix):
             y = W.dot(x).astype(np.float32)  # MKL multi-threaded with scipy-intel package
         print('[TiledMatrix.torchdot]: dot=%f' % sw.since())
         return torch.as_tensor(y) 
-        
-                
+                        
     def transpose(self):
         self._blocks = [(j,i,k) for (i,j,k) in self._blocks] if self._blocks is not None else self._blocks
         self._tiles = [t.transpose() for t in self._tiles]
         self._tileshape = (self._tileshape[1], self._tileshape[0])
         self.shape = (self.shape[1], self.shape[0])
         return self
-    
-
 
     def tosparse(self, format='coo'):
         """Convert to Scipy COOrdinate sparse matrix, this is an expensive operation that should be used for small matrices only and for testing purposes"""
@@ -637,7 +629,7 @@ class TiledMatrix(SparseMatrix):
         return self.tosparse(format='coo')
     
     def nnz(self):
-        return sum([t.nnz() for t in self._tiles])
+        return sum([t.nnz for t in self._tiles])
 
     def spy(self, mindim=256, showdim=1024):
         return spy(self.tocoo(), mindim, showdim)
@@ -695,7 +687,7 @@ class Conv2dTiledMatrix(TiledMatrix):
         # Channel tile structure
         sw = Stopwatch()
         T = T.tocsr()
-        print('[TiledMatrix]: tocsr=%f' % sw.since())
+        print('[TiledMatrix.init]: tocsr=%f seconds' % sw.since())
 
         sw = Stopwatch()
         ((H,W), (h,w)) = (self.shape, self._tileshape)
@@ -703,8 +695,8 @@ class Conv2dTiledMatrix(TiledMatrix):
             for cin in range(0, Cin):
                 (ib, ie) = (cout*((Hout*Wout)), (cout+1)*(Hout*Wout))
                 (jb, je) = (cin*Hin*Win, (cin+1)*(Hin*Win))
-                C = T[ib:ie, jb:je]
                 if (cout == 0 and cin == 0):
+                    C = T[ib:ie, jb:je]
                     C = TiledMatrix(C, tileshape)
 
                     self._tiles = C._tiles  # unique per channel
@@ -712,9 +704,9 @@ class Conv2dTiledMatrix(TiledMatrix):
                     self._blocks = [(i, j, k, (Hout*Wout, Hin*Win, len(self._tiles)), (Cout, Cin), 0) for (i,j,k) in C._blocks]  # repeated with stride                    
                 else:
                     for (i, j, k) in self._uniqueblocks:
-                        self._tiles.append( self._tiletype(C[i:min(i+h, H), j:min(j+w, W)]))  # copy?
+                        self._tiles.append(self._tiletype(T[ib+i:ib+min(i+h, H), jb+j:jb+min(j+w, W)]))  # triggers copy, unavoidably slow
                               
-        print('[TiledMatrix]: tile=%f' % sw.since())
+        print('[TiledMatrix.init]: tile=%f seconds' % sw.since())
 
         sw = Stopwatch()
         # Bias tile structure
@@ -724,12 +716,12 @@ class Conv2dTiledMatrix(TiledMatrix):
             self._blocks += [(i, Cin*Hin*Win, k, (0,0,0), (1,1), len(self._tiles)) for (i,j,k) in B._blocks]  # repeated tiles, FIXME: repeated structure 
             self._tiles += B._tiles
 
-        print('[TiledMatrix]: bias=%f' % sw.since())
+        print('[TiledMatrix.init]: bias=%f seconds' % sw.since())
 
         # Rowmajor order
         sw = Stopwatch()
         self._blocks = sorted(self._blocks, key=lambda x: (x[0], x[1]))
-        print('[TiledMatrix]: sort=%f' % sw.since())        
+        print('[TiledMatrix.init]: sort=%f seconds' % sw.since())        
         
     def __iter__(self):
         """Iterator for ((bi,bj), b) tuples with blocks repeated across channels"""
@@ -739,15 +731,15 @@ class Conv2dTiledMatrix(TiledMatrix):
                     yield (i + si*ni, j + sj*nj, k + k_tileoffset + sk*(ni*Nj+nj))  # offset = stride*repetitions
 
     @staticmethod
-    @numba.jit(nopython=True, parallel=True)
+    @numba.jit(nopython=True, parallel=False)
     def _tosparse(tiles, blocks):
 
         # Get memory size
         k_rcd = 0
-        k_rcd_blockoffset = np.zeros(len(blocks), dtype=np.int64)
+        #k_rcd_blockoffset = np.zeros(len(blocks), dtype=np.int64)
         # <__iter__>
         for (kb, (i, j, k, (si,sj,sk), (Ni,Nj), k_tileoffset)) in enumerate(blocks):
-            k_rcd_blockoffset[kb] = k_rcd  # for parallelization
+            #k_rcd_blockoffset[kb] = k_rcd  # for parallelization
             for ni in range(0, Ni):  # row repetition 
                 for nj in range(0, Nj):  # col repetition 
                     kt = k + k_tileoffset + sk*(ni*Nj+nj)  # offset = stride*repetitions                    
@@ -763,7 +755,7 @@ class Conv2dTiledMatrix(TiledMatrix):
         # <__iter__>
         for kb in numba.prange(0, len(blocks)):   # parallel 
             (i, j, k, (si,sj,sk), (Ni,Nj), k_tileoffset) = blocks[kb]
-            k_rcd = int(k_rcd_blockoffset[kb])  # parallel loop offset
+            #k_rcd = int(k_rcd_blockoffset[kb])  # parallel loop offset
             for ni in range(0, Ni):  # row repetition (parallel)
                 for nj in range(0, Nj):  # col repetition 
                     (it, jt, kt) = (i + si*ni, j + sj*nj, k + k_tileoffset + sk*(ni*Nj+nj))  # offset = stride*repetitions                    

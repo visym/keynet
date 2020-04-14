@@ -216,13 +216,16 @@ def test_vgg16():
     inshape = (3,224,224)
     x = torch.randn(1, *inshape)
     net = keynet.vgg.VGG16()
+
     print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 224//4)
+    print(vipy.util.save((sensor, knet), 'test_vgg16.pkl'))
+    #(sensor, knet) = vipy.util.load('test_vgg16.pkl')
 
-    #(sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 224//4)
-    #print(vipy.util.save((sensor, knet), 'test_vgg16.pkl'))
-    (sensor, knet) = vipy.util.load('test_vgg16.pkl')
-
-    assert np.allclose(knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
+    yh = knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten()
+    y = net.forward(x).detach().numpy().flatten()
+    import pdb; pdb.set_trace()
+    assert np.allclose(yh, y, atol=1E-5)
     print('vgg16: keynet-56 num parameters=%d' % knet.num_parameters())
 
 
