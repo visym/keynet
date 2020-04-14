@@ -19,6 +19,7 @@ import keynet.fiberbundle
 from keynet.util import blockview
 from keynet.globals import verbose
 import copy 
+from vipy.util import Stopwatch
 
 
 class KeyedModel(object):
@@ -355,8 +356,10 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         raise ValueError("Invalid local photometric transform '%s' - must be in '%s'" % (local_photometric, str(allowable_photometric)))                
     
     # Compose!
+    sw = Stopwatch()
     A = Cinv.dot(p.dot(g.dot(P.dot(G.dot(C)))))
     Ainv = Cinv.dot(Ginv.dot(Pinv.dot(ginv.dot(pinv.dot(C)))))
+    print('[keygen]: dot=%f' % sw.since())
     return (A, Ainv)
 
 

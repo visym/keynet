@@ -19,7 +19,8 @@ from keynet.util import blockview
 import keynet.globals
 import itertools
 import tempfile
-
+import numba
+import numba.typed
 
 
 def scipy_coo_to_torch_sparse(coo, device='cpu'):
@@ -108,7 +109,49 @@ def diagonal_affine_to_linear(A, bias=None, withinverse=False, dtype=np.float32)
         return L.astype(dtype)
     
 
-def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1, _row=None, format='csr'):
+@numba.jit(nopython=True, parallel=False)
+def _sparse_toeplitz_conv2d(inshape, f, as_correlation, stride):
+    (C,U,V) = inshape
+    (M,C,P,Q) = f.shape
+    C_range = range(0,C) if as_correlation else range(C-1, 0-1, -1)
+    M_range = range(0,M) if as_correlation else range(M-1, 0-1, -1)
+    P_range = range(-((P-1)//2), ((P-1)//2) + 1) if P%2==1 else range(-((P-1)//2), ((P-1)//2) + 2)
+    P_range = P_range if as_correlation else range(max(list(P_range))-1, min(list(P_range))-1, -1)
+    Q_range = range(-((Q-1)//2), ((Q-1)//2) + 1) if P%2==1 else range(-((Q-1)//2), ((Q-1)//2) + 2)
+    Q_range = Q_range if as_correlation else range(max(list(Q_range))-1, min(list(Q_range))-1, -1)
+    (U_div_stride, V_div_stride) = (U//stride, V//stride)
+    
+    rows = np.zeros(U*V*C*M*P*Q, dtype=np.int32)
+    cols = np.zeros(U*V*C*M*P*Q, dtype=np.int32)
+    vals = np.zeros(U*V*C*M*P*Q, dtype=np.float32)
+    k_entry = 0
+    
+    # For every image_row
+    for (ku,u) in enumerate(np.arange(0,U,stride)):
+        # For every image_column
+        for (kv,v) in enumerate(np.arange(0,V,stride)):
+            # For every inchannel (transposed)
+            for (k_inchannel, c_inchannel) in enumerate(C_range):
+                # For every kernel_row (transposed)
+                for (i,p) in enumerate(P_range):
+                    if not ((u+p)>=0 and (u+p)<U):
+                        continue  
+                    # For every kernel_col (transposed)
+                    for (j,q) in enumerate(Q_range):
+                        # For every outchannel
+                        if ((v+q)>=0 and (v+q)<V):
+                            #c = np.ravel_multi_index( (c_inchannel, u+p, v+q), (C,U,V) )
+                            c = c_inchannel*U*V + (u+p)*V + (v+q)
+                            for (k_outchannel, c_outchannel) in enumerate(M_range):
+                                rows[k_entry] = int(c_outchannel*(U_div_stride)*(V_div_stride) + ku*(V_div_stride) + kv)
+                                cols[k_entry] = int(c)
+                                vals[k_entry] = float(f[k_outchannel,k_inchannel,i,j])
+                                k_entry += 1  # impure loop
+
+    return (rows[0:k_entry], cols[0:k_entry], vals[0:k_entry])
+
+
+def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1, format='csr'):
     """ Returns sparse toeplitz matrix (W) in coo format that is equivalent to per-channel pytorch conv2d (spatial correlation) of filter f with a given image with shape=inshape vectorized
         conv2d(img, f) == np.dot(W, img.flatten()), right multiplied
         Example usage: test_keynet.test_sparse_toeplitz_conv2d()
@@ -118,69 +161,28 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1,
           -f.shape = (outchannels, inchannels, kernelheight, kernelwidth)
     """
 
-    if _row is None:
-        # Parallelize construction by row
-        irange = np.arange(0, inshape[1], stride)
-        n_processes = keynet.globals.num_processes()
-        T_rows = Parallel(n_jobs=n_processes)(delayed(sparse_toeplitz_conv2d)(inshape, f, bias, as_correlation, stride, _row=i) for i in (tqdm(irange) if n_processes>1 and keynet.globals.verbose() else irange))
-        T = T_rows[0]
-        for t in T_rows[1:]:
-            T += t  # merge (fast scipy.sparse)
-        if format == 'coo':
-            T = T.tocoo()
-            
-        # Sparse matrix with optional bias and affine augmentation         
-        if bias is not None:
-            (C,U,V) = inshape                
-            UV = (U//stride)*(V//stride)
-            (row, col, val) = zip(*[(i*UV+j, 0, x) for (i,x) in enumerate(bias) for j in range(0, UV)])
-            lastcol = scipy.sparse.coo_matrix( (val, (row, col)), shape=(T.shape[0], 1))
-            lastrow = scipy.sparse.coo_matrix( ([1], ([0], [T.shape[1]])), shape=(1, T.shape[1]+1), dtype=np.float32)
-            return scipy.sparse.vstack( (scipy.sparse.hstack( (T, lastcol)), lastrow) )            
-        else:
-            return T
-        
     # Valid shapes
     assert(len(inshape) == 3 and len(f.shape) == 4)  # 3D tensor inshape=(inchannels, height, width)
     assert(f.shape[1] == inshape[0])  # equal inchannels
     assert(f.shape[2]==f.shape[3] and f.shape[2]%2 == 1)  # filter is square, odd (FIXME)
     if bias is not None:
         assert(len(bias.shape) == 1 and bias.shape[0] == f.shape[0])  # filter and bias have composable shapes
-
-    # Correlation vs. convolution?
     (C,U,V) = inshape
     (M,C,P,Q) = f.shape
-    C_range = range(0,C)
-    M_range = range(0,M)
-    P_range = range(-((P-1)//2), ((P-1)//2) + 1) if P%2==1 else range(-((P-1)//2), ((P-1)//2) + 2)
-    Q_range = range(-((Q-1)//2), ((Q-1)//2) + 1) if P%2==1 else range(-((Q-1)//2), ((Q-1)//2) + 2)
-    (data, row_ind, col_ind) = ([],[],[])
-    (U_div_stride, V_div_stride) = (U//stride, V//stride)
 
-    # For every image_row
-    for (ku,u) in enumerate(np.arange(0,U,stride)):
-        if _row is not None and _row != u:
-            continue
-        # For every image_column
-        for (kv,v) in enumerate(np.arange(0,V,stride)):
-            # For every inchannel (transposed)
-            for (k_inchannel, c_inchannel) in enumerate(C_range if as_correlation else reversed(C_range)):
-                # For every kernel_row (transposed)
-                for (i,p) in enumerate(P_range if as_correlation else reversed(P_range)):
-                    if not ((u+p)>=0 and (u+p)<U):
-                        continue  
-                    # For every kernel_col (transposed)
-                    for (j,q) in enumerate(Q_range if as_correlation else reversed(Q_range)):
-                        # For every outchannel
-                        if ((v+q)>=0 and (v+q)<V):
-                            #c = np.ravel_multi_index( (c_inchannel, u+p, v+q), (C,U,V) )
-                            c = c_inchannel*U*V + (u+p)*V + (v+q)
-                            for (k_outchannel, c_outchannel) in enumerate(M_range if as_correlation else reversed(M_range)):
-                                data.append(f[k_outchannel,k_inchannel,i,j])
-                                row_ind.append( c_outchannel*(U_div_stride)*(V_div_stride) + ku*(V_div_stride) + kv )
-                                col_ind.append( c )
-
+    # Sparse matrix with optional bias and affine augmentation             
+    (row_ind, col_ind, data) = _sparse_toeplitz_conv2d(inshape, f, as_correlation, stride)
     A = scipy.sparse.coo_matrix((data, (row_ind, col_ind)), shape=(M*(U//stride)*(V//stride), C*U*V))
+
+    # Optional bias and affine augmentation         
+    if bias is not None:
+        (C,U,V) = inshape                
+        UV = (U//stride)*(V//stride)
+        (row, col, val) = zip(*[(i*UV+j, 0, x) for (i,x) in enumerate(bias) for j in range(0, UV)])
+        lastcol = scipy.sparse.coo_matrix( (val, (row, col)), shape=(A.shape[0], 1))
+        lastrow = scipy.sparse.coo_matrix( ([1], ([0], [A.shape[1]])), shape=(1, A.shape[1]+1), dtype=np.float32)
+        A = scipy.sparse.vstack( (scipy.sparse.hstack( (A, lastcol)), lastrow) )            
+
     if format == 'csr':
         A = A.tocsr()
     return A
@@ -500,6 +502,7 @@ class SparseMatrix(object):
 
 
 class TiledMatrix(SparseMatrix):
+
     def __init__(self, T, tileshape):
         """Given a sparse matrix T, split into non-overlapping nxn blocks or 'tiles' of size self._tileshape x self.Blocksize, and 
            return an indexed representation for unique submatrices which provides memory efficient matrix vector multiplication when T is self-similar.
@@ -517,16 +520,21 @@ class TiledMatrix(SparseMatrix):
         self.shape = (T.shape[0], T.shape[1])
         self.ndim = 2
 
+        sw = Stopwatch()
         T = T.tocoo()
         (h,w) = tileshape
         (H,W) = self.shape        
-            
+        print('[TiledMatrix] tocoo=%f' % sw.since())
+
+        sw = Stopwatch()
         d_blockidx_to_tile = defaultdict(list)
         for (i,j,v) in zip(T.row, T.col, T.data):
             (ii,jj,vv) = (int(i), int(j), float(v))  # casting to native python types 
             (bi,bj) = (ii//h, jj//w)
-            d_blockidx_to_tile[(bi, bj)].append( (ii-bi*h, jj-bj*w, vv) )
-                
+            d_blockidx_to_tile[(bi, bj)].append( (ii-bi*h, jj-bj*w, vv) )                
+        print('[TiledMatrix] group=%f' % sw.since())
+
+        sw = Stopwatch()
         d_blockhash_to_index = dict()
         self._tiles = []
         self._blocks = []
@@ -540,8 +548,12 @@ class TiledMatrix(SparseMatrix):
                 d_blockhash_to_index[blockhash] = len(self._tiles)-1
             self._blocks.append( (bi*h, bj*w, d_blockhash_to_index[blockhash]) )
 
+        print('[TiledMatrix] hash=%f' % sw.since())
+
+        sw = Stopwatch()
         self._blocks = sorted(self._blocks, key=lambda x: (x[0], x[1]))  # rowmajor order
-                              
+        print('[TiledMatrix] sorted=%f' % sw.since())
+
     def __repr__(self):
         return str('<keynet.TiledMatrix: H=%d, W=%d, tileshape=%s, tiles=%d>' % (*self.shape, str(self.tileshape()), len(self.tiles())))
 
@@ -570,69 +582,22 @@ class TiledMatrix(SparseMatrix):
         self._tiles = tiles
         return self
 
-    def _torchdot(self, x):
-        # FIXME: Too slow
-        (h,w) = self._tileshape
-        (H,W) = self.shape
-        y = torch.zeros((H, x.shape[1])).type(torch.FloatTensor)  # device?
-        for (i, j, k) in self.__iter__():
-            b = self._tiles[k]
-            (H_clip, W_clip) = (i+b.shape[0], j+b.shape[1])
-            y[i:H_clip, :] += b.torchdot(x[j:W_clip, :])
-        return y
 
     def torchdot(self, x):
         """Input is (C*H*W+1)xN tensor, compute right matrix multiplication T*x, return (-1)xN"""
         assert self.shape[1] == x.shape[0], "Non-conformal shape for W=%s, x=%s" % (str(self.shape), str(x.shape))
 
-        if keynet.globals.backend() == 'torch':
+        if not self.is_numpy_dense(x):
+            x = x.detach().numpy()
 
-            torch.set_grad_enabled(False)
-            cuda = torch.device('cuda')
-
-            (H,W) = self.shape
-            (h,w) = self._tileshape
-            y = torch.zeros((H, x.shape[1])).type(torch.FloatTensor).to(device=cuda)  # device?
-            tiles = [scipy_coo_to_torch_sparse(b.tocoo()).to(device=cuda) for b in self._tiles]  # torch conversion
-            x = x.to(device=cuda)
-
-            #yv = y.t().unfold(0, h, h)
-            #xv = x.t().unfold(0, w, w)
-
-            # https://github.com/chrischoy/pytorch-custom-cuda-tutorial
-
-            yv = {i:y[i:i+h, :] for i in range(0,H,h)}
-            xv = {j:x[j:j+w, :] for j in range(0,W,w)}
-            for (kk, (i, j, k)) in enumerate(self.__iter__()):
-                b = tiles[k]
-                if b.shape[0] == h and b.shape[1] == w and i in yv and j in xv:
-                    yv[i] += torch.sparse.mm(b, xv[j])
-                else:
-                    y[i:i+b.shape[0], :] += torch.sparse.mm(b, x[j:j+b.shape[1], :])
-            
-                if kk % 100000 == 0:
-                    print(kk)
-            return y.type(torch.FloatTensor).to('cpu')
-
-            #client = keynet.globals.dask_client()
-            #x_scatter = client.scatter(x, broadcast=True)
-            #obj = client.scatter(self.clone(), broadcast=True)
-            #results = [client.submit(lambda x: ((x,  min(x+di, H)), obj.result().torchdot(x_scatter.result(), (x, min(x+di, H)))), i) for i in range(0, H, di)]
-
-            #y = np.zeros( (H, x.shape[1]), dtype=np.float32)
-            #from dask.distributed import as_completed
-            #for (f, ((ib,ie),r)) in as_completed(results, with_results=True):
-            #    y[ib:ie,:] = r
-
-            #return torch.as_tensor(y)
-
-        else:
-            if not self.is_numpy_dense(x):
-                x = x.detach().numpy()
-
-            W = self.tocsr()   # very slow for large matrices
+        with Stopwatch() as sw:
+            W = self.tocsr()   # slow for large matrices
+        print('[TiledMatrix.torchdot]: tocsr=%f' % sw.since())
+        with Stopwatch() as sw:
             y = W.dot(x).astype(np.float32)  # MKL multi-threaded with scipy-intel package
-            return torch.as_tensor(y)  
+        print('[TiledMatrix.torchdot]: dot=%f' % sw.since())
+        return torch.as_tensor(y) 
+        
                 
     def transpose(self):
         self._blocks = [(j,i,k) for (i,j,k) in self._blocks] if self._blocks is not None else self._blocks
@@ -641,6 +606,8 @@ class TiledMatrix(SparseMatrix):
         self.shape = (self.shape[1], self.shape[0])
         return self
     
+
+
     def tosparse(self, format='coo'):
         """Convert to Scipy COOrdinate sparse matrix, this is an expensive operation that should be used for small matrices only and for testing purposes"""
         ((H,W), (h,w)) = (self.shape, self._tileshape)
@@ -702,7 +669,7 @@ class DiagonalTiledMatrix(TiledMatrix):
         """Iterator for ((bi,bj), b) tuples along diagonal"""
         ((H,W), (h,w)) = (self.shape, self._tileshape)
         for (i, j) in zip(range(0, H, h), range(0, W, w)):
-            yield (i, j, 0) if (i+h<H and j+w<W) else (i, j, len(self._tiles))
+            yield (i, j, 0) if (i+h<H and j+w<W) else (i, j, len(self._tiles)-1)
 
 
 class Conv2dTiledMatrix(TiledMatrix):    
@@ -726,7 +693,11 @@ class Conv2dTiledMatrix(TiledMatrix):
             assert self.shape[0] % tileshape[0] == 0 and self.shape[1] % tileshape[1] == 0            
         
         # Channel tile structure
+        sw = Stopwatch()
         T = T.tocsr()
+        print('[TiledMatrix]: tocsr=%f' % sw.since())
+
+        sw = Stopwatch()
         ((H,W), (h,w)) = (self.shape, self._tileshape)
         for cout in range(0, Cout):
             for cin in range(0, Cin):
@@ -741,8 +712,11 @@ class Conv2dTiledMatrix(TiledMatrix):
                     self._blocks = [(i, j, k, (Hout*Wout, Hin*Win, len(self._tiles)), (Cout, Cin), 0) for (i,j,k) in C._blocks]  # repeated with stride                    
                 else:
                     for (i, j, k) in self._uniqueblocks:
-                        self._tiles.append( self._tiletype(C[i:min(i+h, H), j:min(j+w, W)]))
+                        self._tiles.append( self._tiletype(C[i:min(i+h, H), j:min(j+w, W)]))  # copy?
                               
+        print('[TiledMatrix]: tile=%f' % sw.since())
+
+        sw = Stopwatch()
         # Bias tile structure
         if bias:
             B = TiledMatrix(T[:,-1], tileshape=(self._tileshape[0], 1))
@@ -750,14 +724,81 @@ class Conv2dTiledMatrix(TiledMatrix):
             self._blocks += [(i, Cin*Hin*Win, k, (0,0,0), (1,1), len(self._tiles)) for (i,j,k) in B._blocks]  # repeated tiles, FIXME: repeated structure 
             self._tiles += B._tiles
 
+        print('[TiledMatrix]: bias=%f' % sw.since())
+
         # Rowmajor order
+        sw = Stopwatch()
         self._blocks = sorted(self._blocks, key=lambda x: (x[0], x[1]))
+        print('[TiledMatrix]: sort=%f' % sw.since())        
         
     def __iter__(self):
         """Iterator for ((bi,bj), b) tuples with blocks repeated across channels"""
         for (i, j, k, (si,sj,sk), (Ni,Nj), k_tileoffset) in self._blocks:
             for ni in range(0, Ni):  # row repetition 
                 for nj in range(0, Nj):  # col repetition 
-                    #b = self._tiles[k + k_tileoffset + sk*(ni*Nj+nj)]  # new tiles, repeated structure
                     yield (i + si*ni, j + sj*nj, k + k_tileoffset + sk*(ni*Nj+nj))  # offset = stride*repetitions
-                    
+
+    @staticmethod
+    @numba.jit(nopython=True, parallel=True)
+    def _tosparse(tiles, blocks):
+
+        # Get memory size
+        k_rcd = 0
+        k_rcd_blockoffset = np.zeros(len(blocks), dtype=np.int64)
+        # <__iter__>
+        for (kb, (i, j, k, (si,sj,sk), (Ni,Nj), k_tileoffset)) in enumerate(blocks):
+            k_rcd_blockoffset[kb] = k_rcd  # for parallelization
+            for ni in range(0, Ni):  # row repetition 
+                for nj in range(0, Nj):  # col repetition 
+                    kt = k + k_tileoffset + sk*(ni*Nj+nj)  # offset = stride*repetitions                    
+                    # </__iter__>
+                    k_rcd += len(tiles[kt][0])
+
+        # Allocate memory (parallelizable)
+        (rows, cols, data) = (np.zeros(k_rcd, dtype=np.int32), np.zeros(k_rcd, dtype=np.int32), np.zeros(k_rcd, dtype=np.float32))
+
+        # Create sparse array indexes
+        kb = 0  # numba requirement?
+        k_rcd = 0  # numba requirement?
+        # <__iter__>
+        for kb in numba.prange(0, len(blocks)):   # parallel 
+            (i, j, k, (si,sj,sk), (Ni,Nj), k_tileoffset) = blocks[kb]
+            k_rcd = int(k_rcd_blockoffset[kb])  # parallel loop offset
+            for ni in range(0, Ni):  # row repetition (parallel)
+                for nj in range(0, Nj):  # col repetition 
+                    (it, jt, kt) = (i + si*ni, j + sj*nj, k + k_tileoffset + sk*(ni*Nj+nj))  # offset = stride*repetitions                    
+                    # </__iter__>
+
+                    t = tiles[kt]
+                    n_rcd = len(t[0])
+                    for tk in range(0, n_rcd):
+                        rows[k_rcd] = it+t[0][tk]  
+                        cols[k_rcd] = jt+t[1][tk]
+                        data[k_rcd] = t[2][tk]
+                        k_rcd += 1  # impure loop, but offset is assigned in outer loop
+
+        return (rows, cols, data)
+
+    
+    def tosparse(self, format='coo'):
+
+        # http://numba.pydata.org/numba-doc/latest/reference/deprecation.html#deprecation-of-reflection-for-list-and-set-types
+        nb_tiles = numba.typed.List()
+        tiles = [t.tocoo() for t in self._tiles]  
+        [nb_tiles.append( (t.row, t.col, t.data) ) for t in tiles]
+
+        nb_blocks = numba.typed.List()
+        [nb_blocks.append(b) for b in self._blocks]
+        
+        (rows, cols, data) = self._tosparse(nb_tiles, nb_blocks)
+
+        if format == 'csr':
+            T = scipy.sparse.csr_matrix( (data, (rows, cols)), shape=self.shape)
+        elif format == 'coo':
+            T = scipy.sparse.coo_matrix( (data, (rows, cols)), shape=self.shape)
+        elif format == 'csc':
+            T = scipy.sparse.csc_matrix( (data, (rows, cols)), shape=self.shape)
+        else:
+            raise ValueError('Invalid format "%s" - must be ["coo", "csr", "csc"]' % format)
+        return T            
+

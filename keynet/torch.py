@@ -11,7 +11,7 @@ import os
 from torch import nn
 from collections import OrderedDict
 import keynet.sparse
-from joblib import Parallel, delayed
+import numba
 
 
 def count_parameters(model):
@@ -169,3 +169,15 @@ class TiledMatrix(keynet.sparse.TiledMatrix):
     def _tiletype(self, B):
         return keynet.torch.SparseMatrix(scipy_coo_to_torch_sparse(B))
     
+    @staticmethod
+    @numba.jit(nopython=True, parallel=True, fastmath=True)
+    def _torchdot(x_numpy, tileshape, shape, tiles, blocks):
+        (h,w) = (int(tileshape[0]), int(tileshape[1]))
+        (H,W) = (int(shape[0]), int(shape[1]))
+        y = np.zeros( (H, x_numpy.shape[1]), dtype=np.float32)
+        for (i, j, k) in blocks:
+            b = tiles[k]            
+            for u in range(0, b.shape[0]):
+                (ii,jj,v) = (int(b[u,0]), int(b[u,1]), float(b[u,2]))
+                y[i+ii, :] += v*x_numpy[j+jj, :]
+        return y 

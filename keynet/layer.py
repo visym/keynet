@@ -10,7 +10,7 @@ from keynet.sparse import is_scipy_sparse, sparse_toeplitz_avgpool2d, sparse_toe
 import vipy
 from keynet.globals import GLOBAL, verbose
 import scipy.sparse
-
+from vipy.util import Stopwatch
 
 class KeyedLayer(nn.Module):
     def __init__(self, module, inshape, outshape, A, Ainv, tileshape=None):
@@ -28,8 +28,12 @@ class KeyedLayer(nn.Module):
             assert module.padding[0] == module.kernel_size[0]//2 and module.padding[1] == module.kernel_size[1]//2, "Padding is assumed to be equal to (kernelsize-1)/2"            
             stride = module.stride[0] if len(module.stride)==2 else module.stride
             self._repr = 'Conv2d: in_channels=%d, out_channels=%d, kernel_size=%s, stride=%s' % (module.in_channels, module.out_channels, str(module.kernel_size), str(stride))      
+            sw = Stopwatch()
             self.W = sparse_toeplitz_conv2d(inshape, module.weight.detach().numpy(), bias=module.bias.detach().numpy(), stride=module.stride[0])            
+            print('[KeyedLayer]: sparse_toeplitz_conv2d=%f' % sw.since())
+            sw = Stopwatch()
             self.W = A.dot(self.W).dot(Ainv)  # Key!            
+            print('[KeyedLayer]: conv2d dot=%f' % sw.since())
             if tileshape is not None:
                 self.W = keynet.sparse.Conv2dTiledMatrix(self.W, self._inshape, self._outshape, self._tileshape, bias=True)
             
@@ -43,8 +47,12 @@ class KeyedLayer(nn.Module):
             stride = module.stride if isinstance(module.stride, int) else module.stride[0]
             kernel_size = module.kernel_size if isinstance(module.kernel_size, int) else module.kernel_size[0]
             self._repr = 'AvgPool2d: kernel_size=%s, stride=%s' % (str(kernel_size), str(stride))
+            sw = Stopwatch()
             self.W = sparse_toeplitz_avgpool2d(inshape, (inshape[0], inshape[0], kernel_size, kernel_size), stride)
+            print('[KeyedLayer]: sparse_toeplitz_conv2d=%f' % sw.since())
+            sw = Stopwatch()
             self.W = A.dot(self.W).dot(Ainv) if A is not None else self.W.dot(Ainv)  # optional outkey
+            print('[KeyedLayer]: avgpool2d dot=%f' % sw.since())
             if tileshape is not None:
                 self.W = keynet.sparse.Conv2dTiledMatrix(self.W, self._inshape, self._outshape, self._tileshape, bias=True)
             
