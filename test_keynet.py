@@ -331,20 +331,19 @@ if __name__ == '__main__':
     #test_memory_order()
     #test_keynet_mnist()
 
-    if sys.argv[1] == 'vgg16-identity-tiled':
+    if len(sys.argv) == 1:
+        test_identity_keynet()
+        test_tiled_keynet()
+        test_permutation_keynet()
+        test_photometric_keynet()
+
+    elif sys.argv[1] == 'vgg16-identity-tiled':
         test_vgg16_identity_tiled()
     elif sys.argv[1] == 'vgg16-identity':
         test_vgg16_identity()
     elif sys.argv[1] == 'vgg16-orthogonal':
         test_vgg16_orthogonal()
     elif sys.argv[1] == 'lenet-orthogonal':
-        #test_permutation_keynet()
         test_lenet_orthogonal_tiled()
-        #test_lenet_orthogonal()
-
-    else:
-        test_identity_keynet()
-        test_tiled_keynet()
-        test_permutation_keynet()
-        test_photometric_keynet()
+        test_lenet_orthogonal()
 

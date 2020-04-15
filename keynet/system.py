@@ -238,10 +238,10 @@ class OpticalFiberBundle(KeyedSensor):
 
 def layergen(module, inshape, outshape, A, Ainv, tileshape=None, backend='scipy'):
     if tileshape is not None:
-        new_tileshape = (keynet.util.find_closest_positive_divisor(outshape[1]*outshape[2], tileshape[0]),  # force non-ragged spatial tileshape
-                         keynet.util.find_closest_positive_divisor(inshape[1]*inshape[2], tileshape[1])) 
+        new_tileshape = (keynet.util.find_closest_positive_divisor(outshape[1], tileshape[0]),  # force non-ragged spatial tileshape
+                         keynet.util.find_closest_positive_divisor(inshape[1], tileshape[1])) 
         if new_tileshape != tileshape:
-            print('[layergen]: Ragged spatial tileshape=%s, forcing non-ragged tileshape "%s" for inshape="%s"' % (str(tileshape), str(new_tileshape), str(inshape)))
+            print('[layergen]: Ragged spatial tileshape=%s, forcing non-ragged tileshape "%s" for inshape="%s", outshape="%s"' % (str(tileshape), str(new_tileshape), str(inshape), str(outshape)))
         tileshape = new_tileshape
 
     if backend == 'scipy':
