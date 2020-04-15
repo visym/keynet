@@ -518,7 +518,7 @@ class TiledMatrix(SparseMatrix):
         T = T.tocoo()
         (h,w) = tileshape
         (H,W) = self.shape        
-        print('[TiledMatrix] tocoo=%f' % sw.since())
+        print('[TiledMatrix] tocoo=%1.1f' % sw.since())
 
         sw = Stopwatch()
         d_blockidx_to_tile = defaultdict(list)
@@ -526,7 +526,7 @@ class TiledMatrix(SparseMatrix):
             (ii,jj,vv) = (int(i), int(j), float(v))  # casting to native python types 
             (bi,bj) = (ii//h, jj//w)
             d_blockidx_to_tile[(bi, bj)].append( (ii-bi*h, jj-bj*w, vv) )                
-        print('[TiledMatrix] group=%f' % sw.since())
+        print('[TiledMatrix] group=%1.1f' % sw.since())
 
         sw = Stopwatch()
         d_blockhash_to_index = dict()
@@ -542,11 +542,11 @@ class TiledMatrix(SparseMatrix):
                 d_blockhash_to_index[blockhash] = len(self._tiles)-1
             self._blocks.append( (bi*h, bj*w, d_blockhash_to_index[blockhash]) )
 
-        print('[TiledMatrix] hash=%f' % sw.since())
+        print('[TiledMatrix] hash=%1.1f' % sw.since())
 
         sw = Stopwatch()
         self._blocks = sorted(self._blocks, key=lambda x: (x[0], x[1]))  # rowmajor order
-        print('[TiledMatrix] sorted=%f' % sw.since())
+        print('[TiledMatrix] sorted=%1.1f' % sw.since())
 
     def __repr__(self):
         return str('<keynet.TiledMatrix: H=%d, W=%d, tileshape=%s, tiles=%d>' % (*self.shape, str(self.tileshape()), len(self.tiles())))
@@ -587,10 +587,10 @@ class TiledMatrix(SparseMatrix):
 
         with Stopwatch() as sw:
             W = self.tocsr()   # slow for large matrices
-        print('[TiledMatrix.torchdot]: tocsr=%f' % sw.since())
+        print('[TiledMatrix.torchdot]: tocsr=%1.1f' % sw.since())
         with Stopwatch() as sw:
             y = W.dot(x).astype(np.float32)  # MKL multi-threaded with scipy-intel package
-        print('[TiledMatrix.torchdot]: dot=%f' % sw.since())
+        print('[TiledMatrix.torchdot]: dot=%1.1f' % sw.since())
         return torch.as_tensor(y) 
                         
     def transpose(self):
@@ -687,7 +687,7 @@ class Conv2dTiledMatrix(TiledMatrix):
         # Channel tile structure
         sw = Stopwatch()
         T = T.tocsr()
-        print('[TiledMatrix.init]: tocsr=%f seconds' % sw.since())
+        print('[TiledMatrix.init]: tocsr=%1.1f seconds' % sw.since())
 
         # Sanity check: same sparsity structure across channels
         if Cout > 1 and Cin > 1:
@@ -711,7 +711,7 @@ class Conv2dTiledMatrix(TiledMatrix):
                     for (i, j, k) in self._uniqueblocks:
                         self._tiles.append(self._tiletype(T[ib+i:ib+min(i+h, H), jb+j:jb+min(j+w, W)]))  # triggers copy, unavoidably slow
                               
-        print('[TiledMatrix.init]: tile=%f seconds' % sw.since())
+        print('[TiledMatrix.init]: tile=%1.1f seconds' % sw.since())
 
         sw = Stopwatch()
         # Bias tile structure
@@ -721,12 +721,12 @@ class Conv2dTiledMatrix(TiledMatrix):
             self._blocks += [(i, Cin*Hin*Win, k, (0,0,0), (1,1), len(self._tiles)) for (i,j,k) in B._blocks]  # repeated tiles, FIXME: repeated structure 
             self._tiles += B._tiles
 
-        print('[TiledMatrix.init]: bias=%f seconds' % sw.since())
+        print('[TiledMatrix.init]: bias=%1.1f seconds' % sw.since())
 
         # Rowmajor order
         sw = Stopwatch()
         self._blocks = sorted(self._blocks, key=lambda x: (x[0], x[1]))
-        print('[TiledMatrix.init]: sort=%f seconds' % sw.since())        
+        print('[TiledMatrix.init]: sort=%1.1f seconds' % sw.since())        
 
         
 

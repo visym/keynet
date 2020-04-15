@@ -7,7 +7,7 @@ python-3.*
 Required 
 
 ```python
-pip3 install intel-scipy intel-numpy torch torchvision vipy scikit-learn tqdm xxhash numba
+pip3 install intel-scipy intel-numpy torch torchvision vipy scikit-learn xxhash numba
 pip3 install -e .
 ```
 

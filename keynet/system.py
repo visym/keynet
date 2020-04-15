@@ -402,7 +402,7 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
     sw = Stopwatch()
     A = Cinv.dot(p.dot(g.dot(P.dot(G.dot(C)))))
     Ainv = Cinv.dot(Ginv.dot(Pinv.dot(ginv.dot(pinv.dot(C)))))
-    print('[keygen]: dot=%f seconds' % sw.since())
+    print('[keygen]: dot=%1.1f seconds' % sw.since())
     return (A, Ainv)
 
 
