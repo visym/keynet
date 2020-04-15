@@ -22,6 +22,16 @@ import numba
 import numba.typed
 
 
+def mat2gray(x, dtype=np.float32):
+    """xh = (x - min(x))/(max(x)-min(x)) -> (1 / (max(x)-min(x)))*x - (min(x)/max(x)-min(x))"""
+    (xmin, xmax) = (np.min(x), np.max(x))
+    gain = 1.0 / (xmax - xmin)
+    bias = -xmin / (xmax-xmin)
+    n = np.max(x.shape)
+
+    (A, Ainv) = diagonal_affine_to_linear(gain*scipy.sparse.eye(n), np.ones( (n,1) )*bias, withinverse=True, dtype=dtype)
+    return (A, Ainv)
+
 def scipy_coo_to_torch_sparse(coo, device='cpu'):
     """https://stackoverflow.com/questions/50665141/converting-a-scipy-coo-matrix-to-pytorch-sparse-tensor"""
 
