@@ -54,7 +54,7 @@ class KeyedLayer(nn.Module):
             self.W = A.dot(self.W).dot(Ainv) if A is not None else self.W.dot(Ainv)  # optional outkey
             print('[KeyedLayer]: avgpool2d dot=%f seconds' % sw.since())
             if tileshape is not None:
-                self.W = keynet.sparse.Conv2dTiledMatrix(self.W, self._inshape, self._outshape, self._tileshape, bias=True)
+                self.W = keynet.sparse.TiledMatrix(self.W, self._tileshape)
             
         elif isinstance(module, nn.Linear):
             self._repr = 'Linear: in_features=%d, out_features=%d' % (module.in_features, module.out_features)

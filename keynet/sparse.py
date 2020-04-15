@@ -690,6 +690,11 @@ class Conv2dTiledMatrix(TiledMatrix):
         T = T.tocsr()
         print('[TiledMatrix.init]: tocsr=%f seconds' % sw.since())
 
+        # Sanity check: same sparsity structure across channels
+        if Cout > 1 and Cin > 1:
+            assert ((T[0:Hout, 0:Hin] != 0) != (T[Hout*Wout:Hout*Wout+Hout, 0:Hin] != 0)).nnz == 0
+            assert ((T[0:Hout, 0:Hin] != 0) != (T[0:Hout, Hin*Win:Hin*Win+Hin] != 0)).nnz == 0
+
         sw = Stopwatch()
         ((H,W), (h,w)) = (self.shape, self._tileshape)
         for cout in range(0, Cout):
@@ -723,7 +728,9 @@ class Conv2dTiledMatrix(TiledMatrix):
         sw = Stopwatch()
         self._blocks = sorted(self._blocks, key=lambda x: (x[0], x[1]))
         print('[TiledMatrix.init]: sort=%f seconds' % sw.since())        
+
         
+
     def __iter__(self):
         """Iterator for ((bi,bj), b) tuples with blocks repeated across channels"""
         for (i, j, k, (si,sj,sk), (Ni,Nj), k_tileoffset) in self._blocks:

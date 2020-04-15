@@ -227,21 +227,20 @@ def test_vgg16_identity():
     print('vgg16: keynet-56 num parameters=%d' % knet.num_parameters())
 
 
-def test_vgg16():
+def test_vgg16_identity_tiled():
 
     inshape = (3,224,224)
     x = torch.randn(1, *inshape)
     net = keynet.vgg.VGG16()
 
-    #print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
-    #(sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 224//4)
-    #print(vipy.util.save((sensor, knet), 'test_vgg16.pkl'))
-    (sensor, knet) = vipy.util.load('test_vgg16.pkl')
+    print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
+    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 224//4)
+    print(vipy.util.save((sensor, knet), 'test_vgg16.pkl'))
+    #(sensor, knet) = vipy.util.load('test_vgg16.pkl')
 
     yh = knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
     
-    import pdb; pdb.set_trace()
     assert np.allclose(yh, y, atol=1E-3)
     print('vgg16: keynet-56 num parameters=%d' % knet.num_parameters())
 
@@ -313,7 +312,7 @@ def test_lenet_orthogonal_tiled():
                                           global_photometric='identity',
                                           local_geometric='givens_orthogonal', alpha=2.0, blocksize=4,
                                           local_photometric='uniform_random_affine', beta=1.0, gamma=1.0,
-                                          memoryorder='channel')
+                                          memoryorder='block')
 
     yh = knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
@@ -332,12 +331,11 @@ if __name__ == '__main__':
     #test_memory_order()
     #test_keynet_mnist()
 
-    if sys.argv[1] == 'vgg16':
-        test_vgg16()
+    if sys.argv[1] == 'vgg16-identity-tiled':
+        test_vgg16_identity_tiled()
     elif sys.argv[1] == 'vgg16-identity':
         test_vgg16_identity()
     elif sys.argv[1] == 'vgg16-orthogonal':
-        #test_vgg16_stochastic()
         test_vgg16_orthogonal()
     elif sys.argv[1] == 'lenet-orthogonal':
         #test_permutation_keynet()
