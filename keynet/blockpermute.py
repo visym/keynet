@@ -1,9 +1,12 @@
 import scipy.sparse
 import numpy as np
+from keynet.util import find_closest_positive_divisor
 
 
 def block_permute(img, cropshape, seed=None):
-    """For every non-overlapping subimg in img of size (H,W)=cropshape, randomly permute the blocks, preserving the order and channels within the block"""
+    """For every non-overlapping subimg in img of size cropshape=(H,W), randomly permute the blocks, preserving the order and channels within the block.
+       This assumes that img.shape == (H,W,C)
+    """
     assert img.shape[0] % cropshape[0] == 0 and img.shape[1] % cropshape[1] == 0, "Blocksize must be evenly divisible with image shape"
     if seed is not None:
         np.random.seed(seed)
@@ -16,7 +19,7 @@ def block_permute(img, cropshape, seed=None):
     return img_permuted
 
 
-def hierarchical_block_permute(img, blockshape, permute_at_level, min_blocksize=8, seed=None, twist=False):
+def hierarchical_block_permute(img, blockshape, permute_at_level, min_blocksize=8, seed=None, twist=False, strict=True):
     """Generate a top-down, hierarchical block permutation
     
        input:
@@ -26,10 +29,19 @@ def hierarchical_block_permute(img, blockshape, permute_at_level, min_blocksize=
          -twist:  restrict the permutation at each level to a rotation only
          -min_blocksize:  the smallest dimension of any block
     """
-    if len(permute_at_level) == 0:
+
+    if len(permute_at_level) == 0 or blockshape == img.shape:
         return np.copy(img)
 
-    assert img.shape[0] % blockshape[0] == 0 and img.shape[1] % blockshape[1] == 0, "Recursive image size %s and block layout %s must be divisible" % (str(img.shape[0:2]), str(blockshape))
+    if (img.shape[0] % blockshape[0] != 0 and img.shape[1] % blockshape[1] != 0):
+        if strict:
+            raise ValueError("Recursive image size %s and block layout %s must be divisible" % (str(img.shape[0:2]), str(blockshape)))
+        else:
+            # Try to set the closest blockshape that is evenly divisible with img.shape
+            new_blockshape = (find_closest_positive_divisor(img.shape[0], blockshape[0]), find_closest_positive_divisor(img.shape[1], blockshape[1]))
+            print('[keynet.blockpermute]: Ragged blockshape %s for image size %s, since strict=false, setting to %s' % (str(blockshape), str(img.shape[0:2]), str(new_blockshape)))        
+            blockshape = new_blockshape
+
     imgsize = (img.shape[0], img.shape[1])
     cropshape = (img.shape[0] // blockshape[0], img.shape[1] // blockshape[1])
     levels = int(np.log2(min(imgsize)))
@@ -43,7 +55,7 @@ def hierarchical_block_permute(img, blockshape, permute_at_level, min_blocksize=
         else:
             img_permuted = block_permute(img_permuted, cropshape, seed=None)  # seed must be None
 
-    if len(permute_at_level)==1 and all(permute_at_level == [0]):
+    if len(permute_at_level)==1 and permute_at_level[0] == 0:
         return img_permuted
     for i in range(0, img.shape[0], cropshape[0]):
         for j in range(0, img.shape[1], cropshape[1]):
@@ -56,10 +68,10 @@ def hierarchical_block_permute(img, blockshape, permute_at_level, min_blocksize=
     return img_permuted
 
 
-def hierarchical_block_permutation_matrix(imgshape, blockshape, permute_at_level, min_blocksize=8, seed=None, twist=False, withinverse=False):
+def hierarchical_block_permutation_matrix(imgshape, blockshape, permute_at_level, min_blocksize=8, seed=None, twist=False, withinverse=False, strict=True):
     """Given an image with shape=(HxWxC) return the permutation matrix P such that P.dot(img.flatten()).reshape(imgshape) == hierarchical_block_permute(img, ...)"""
     img = np.array(range(0, np.prod(imgshape))).reshape(imgshape)
-    img_permute = hierarchical_block_permute(img, blockshape, permute_at_level, min_blocksize, seed=seed, twist=twist)
+    img_permute = hierarchical_block_permute(img, blockshape, permute_at_level, min_blocksize, seed=seed, twist=twist, strict=strict)
     cols = img_permute.flatten()    
     rows = range(0, len(cols))
     vals = np.ones_like(rows)

@@ -272,6 +272,7 @@ def sparse_permutation_matrix(n, dtype=np.float32, withinverse=False):
 
 def sparse_orthogonal_matrix(n, k_iter, balanced=True, withinverse=False, dtype=np.float32):
     """Givens rotations"""
+    assert n >= 2
     S = None
     G_index = []
     for k in range(0, k_iter):
@@ -753,7 +754,7 @@ class Conv2dTiledMatrix(TiledMatrix):
         kb = 0  # numba requirement?
         k_rcd = 0  # numba requirement?
         # <__iter__>
-        for kb in numba.prange(0, len(blocks)):   # parallel 
+        for kb in range(0, len(blocks)):   # parallelizable 
             (i, j, k, (si,sj,sk), (Ni,Nj), k_tileoffset) = blocks[kb]
             #k_rcd = int(k_rcd_blockoffset[kb])  # parallel loop offset
             for ni in range(0, Ni):  # row repetition (parallel)

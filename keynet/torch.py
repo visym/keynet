@@ -71,7 +71,8 @@ def affine_to_linear(x):
 def linear_to_affine(x, outshape=None):
     """Convert Nx(K+1) tensor to NxK by removing last column (which must be one), and reshaping NxK -> NxCxHxW==outshape"""
     assert len(x.shape) == 2
-    assert np.all(x[:,-1].detach().numpy() == 1)
+    if not np.allclose(x[:,-1].detach().numpy(), 1, atol=1E-3):
+        raise ValueError('invalid affine vector "%s"' % (str(x)))
     x_affine = torch.narrow(x, 1, 0, x.shape[1]-1)
     return x_affine.reshape(outshape) if outshape is not None else x_affine
 

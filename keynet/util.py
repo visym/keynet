@@ -13,6 +13,20 @@ from numpy.lib.stride_tricks import as_strided
 import vipy
 
 
+def find_closest_positive_divisor(a, b):
+    """Return non-trivial integer divisor (bh) of (a) closest to (b) in abs(b-bh) such that a % bh == 0"""
+    assert a>0 and b>0
+    if a<=b:
+        return a
+    for k in range(0, a-b+1):
+        bh = b + k
+        if bh>1 and a % bh == 0:
+            return bh
+        bh = b - k
+        if bh>1 and a % bh == 0:
+            return bh
+    return a  # should never get here, since bh=a is always a solution
+
     
 def matrix_blockview(W, inshape, n):
     """Reorder a sparse matrix W such that:  W*x.flatten() == matrix_blockview(W, x.shape, n)*blockview(x,n).flatten()"""

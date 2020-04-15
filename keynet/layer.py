@@ -80,6 +80,7 @@ class KeyedLayer(nn.Module):
     def forward(self, x_affine):
         if verbose():
             print('[keynet.layer]: forward %s' % str(self))
+
         y = self.W.torchdot(x_affine.t()).t()
         return y if not 'ReLU' in self._layertype else F.relu(y)
         

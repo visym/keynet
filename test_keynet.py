@@ -211,21 +211,38 @@ def test_keynet_mnist():
     return 
 
     
-def test_vgg16():
+def test_vgg16_identity():
 
     inshape = (3,224,224)
     x = torch.randn(1, *inshape)
     net = keynet.vgg.VGG16()
 
     print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 224//4)
-    print(vipy.util.save((sensor, knet), 'test_vgg16.pkl'))
-    #(sensor, knet) = vipy.util.load('test_vgg16.pkl')
+    (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)
 
     yh = knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
     import pdb; pdb.set_trace()
-    assert np.allclose(yh, y, atol=1E-5)
+    assert np.allclose(yh, y, atol=1E-3)
+    print('vgg16: keynet-56 num parameters=%d' % knet.num_parameters())
+
+
+def test_vgg16():
+
+    inshape = (3,224,224)
+    x = torch.randn(1, *inshape)
+    net = keynet.vgg.VGG16()
+
+    #print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
+    #(sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 224//4)
+    #print(vipy.util.save((sensor, knet), 'test_vgg16.pkl'))
+    (sensor, knet) = vipy.util.load('test_vgg16.pkl')
+
+    yh = knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten()
+    y = net.forward(x).detach().numpy().flatten()
+    
+    import pdb; pdb.set_trace()
+    assert np.allclose(yh, y, atol=1E-3)
     print('vgg16: keynet-56 num parameters=%d' % knet.num_parameters())
 
 
@@ -236,9 +253,9 @@ def test_vgg16_stochastic():
     print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
 
     keynet.globals.num_processes(48)
-    (sensor, knet) = keynet.system.Keynet(inshape, net, tileshape=(224//4, 224//4), 
+    (sensor, knet) = keynet.system.Keynet(inshape, net, tileshape=(224//16, 224//16), 
                                           global_geometric='hierarchical_permutation', hierarchical_blockshape=(2,2), hierarchical_permute_at_level=(0,1,2),
-                                          local_geometric='doubly_stochastic', alpha=2.0, blocksize=224//4,
+                                          local_geometric='doubly_stochastic', alpha=2.0, blocksize=224//16,
                                           local_photometric='uniform_random_affine', beta=1.0, gamma=1.0,
                                           memoryorder='channel')
                                           
@@ -252,9 +269,9 @@ def test_vgg16_orthogonal():
     net = keynet.vgg.VGG16()
     print('vgg16: num parameters=%d' % keynet.torch.count_parameters(net))
 
-    (sensor, knet) = keynet.system.Keynet(inshape, net, tileshape=(224//4, 224//4), 
+    (sensor, knet) = keynet.system.Keynet(inshape, net, tileshape=(224//16, 224//16), 
                                           global_geometric='identity', hierarchical_blockshape=(2,2), hierarchical_permute_at_level=(0,1,2),
-                                          local_geometric='givens_orthogonal', alpha=2.0, blocksize=224//4,
+                                          local_geometric='givens_orthogonal', alpha=2.0, blocksize=224//16,
                                           local_photometric='uniform_random_affine', beta=1.0, gamma=1.0,
                                           memoryorder='channel')
     print(vipy.util.save((sensor, knet), 'test_vgg16_orthogonal.pkl'))
@@ -263,11 +280,51 @@ def test_vgg16_orthogonal():
     print('vgg16: keynet-orthogonal-56 num parameters=%d' % knet.num_parameters())
 
 
+def test_lenet_orthogonal():
+    inshape = (1,28,28)
+    x = torch.randn(1, *inshape)
+    net = keynet.mnist.LeNet_AvgPool()
+    print('lenet: num parameters=%d' % keynet.torch.count_parameters(net))
+
+    (sensor, knet) = keynet.system.Keynet(inshape, net, tileshape=None, 
+                                          global_geometric='hierarchical_rotation', hierarchical_blockshape=(2,2), hierarchical_permute_at_level=(0),
+                                          global_photometric='uniform_random_bias', 
+                                          local_geometric='givens_orthogonal', alpha=2.0, blocksize=8,
+                                          local_photometric='uniform_random_affine', beta=1.0, gamma=1.0,
+                                          memoryorder='block')
+
+    yh = knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten()
+    y = net.forward(x).detach().numpy().flatten()
+    
+    print(y)
+    print(yh)
+    assert np.allclose(y, yh, atol=1E-5)
+    print('lenet: keynet-orthogonal-56 num parameters=%d' % knet.num_parameters())
+
+
+def test_lenet_orthogonal_tiled():
+    inshape = (1,28,28)
+    x = torch.randn(1, *inshape)
+    net = keynet.mnist.LeNet_AvgPool()
+    print('lenet: num parameters=%d' % keynet.torch.count_parameters(net))
+
+    (sensor, knet) = keynet.system.Keynet(inshape, net, tileshape=(4,4), 
+                                          global_geometric='hierarchical_permutation', hierarchical_blockshape=(2,2), hierarchical_permute_at_level=(0,1),
+                                          global_photometric='identity',
+                                          local_geometric='givens_orthogonal', alpha=2.0, blocksize=4,
+                                          local_photometric='uniform_random_affine', beta=1.0, gamma=1.0,
+                                          memoryorder='channel')
+
+    yh = knet.forward(sensor.encrypt(x).astensor()).detach().numpy().flatten()
+    y = net.forward(x).detach().numpy().flatten()
+    
+    print(y)
+    print(yh)
+    assert np.allclose(y, yh, atol=1E-5)
+    print('lenet: keynet-orthogonal-tiled-56 num parameters=%d' % knet.num_parameters())
+
+
 if __name__ == '__main__':
-    test_identity_keynet()
-    test_tiled_keynet()
-    test_permutation_keynet()
-    test_photometric_keynet()
     
     #test_keynet_scipy()    
     
@@ -277,6 +334,19 @@ if __name__ == '__main__':
 
     if sys.argv[1] == 'vgg16':
         test_vgg16()
+    elif sys.argv[1] == 'vgg16-identity':
+        test_vgg16_identity()
     elif sys.argv[1] == 'vgg16-orthogonal':
         #test_vgg16_stochastic()
         test_vgg16_orthogonal()
+    elif sys.argv[1] == 'lenet-orthogonal':
+        #test_permutation_keynet()
+        test_lenet_orthogonal_tiled()
+        #test_lenet_orthogonal()
+
+    else:
+        test_identity_keynet()
+        test_tiled_keynet()
+        test_permutation_keynet()
+        test_photometric_keynet()
+
