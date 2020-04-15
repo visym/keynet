@@ -1,3 +1,4 @@
+from vipy.util import try_import
 import tempfile
 
 GLOBAL = {'PROCESSES': 1, 'VERBOSE': True, 'DASK_CLIENT': None}
@@ -8,8 +9,8 @@ def backend():
 def num_processes(n=None, backend='joblib'):
     if n is not None:
         GLOBAL['PROCESSES'] = n
-
         if n > 1 and backend == 'dask':
+            try_import('dask', 'dask distributed')
             from dask.distributed import Client
             client = Client(name='keynet',
                             scheduler_port=0,

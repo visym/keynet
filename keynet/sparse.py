@@ -9,7 +9,6 @@ import torch.sparse
 from numpy.linalg import multi_dot 
 from collections import defaultdict
 from keynet.dense import random_positive_definite_matrix, random_doubly_stochastic_matrix
-from joblib import Parallel, delayed, parallel_backend
 import warnings
 from tqdm import tqdm
 import xxhash
