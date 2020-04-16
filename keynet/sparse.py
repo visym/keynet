@@ -171,14 +171,18 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1,
 
     # Sparse matrix with optional bias and affine augmentation             
     (row_ind, col_ind, data) = _sparse_toeplitz_conv2d(inshape, f, as_correlation, stride)
+    data += 1.0  # preserve sparsity structure for zero coefficient elements
     A = scipy.sparse.coo_matrix((data, (row_ind, col_ind)), shape=(M*(U//stride)*(V//stride), C*U*V))
+    A.data -= 1.0  # restore original weights 
 
     # Optional bias and affine augmentation         
     if bias is not None:
         (C,U,V) = inshape                
         UV = (U//stride)*(V//stride)
         (row, col, val) = zip(*[(i*UV+j, 0, x) for (i,x) in enumerate(bias) for j in range(0, UV)])
+        val += 1  # preserve sparsity structure 
         lastcol = scipy.sparse.coo_matrix( (val, (row, col)), shape=(A.shape[0], 1))
+        lastcol.data -= 1  # restore original bias
         lastrow = scipy.sparse.coo_matrix( ([1], ([0], [A.shape[1]])), shape=(1, A.shape[1]+1), dtype=np.float32)
         A = scipy.sparse.vstack( (scipy.sparse.hstack( (A, lastcol)), lastrow) )            
 
@@ -691,6 +695,7 @@ class Conv2dTiledMatrix(TiledMatrix):
 
         # Sanity check: same sparsity structure across channels
         if Cout > 1 and Cin > 1:
+            # FIXME: this check will fail if a filter coefficient is zero, requires sparsity preserving toeplitz matrix 
             assert ((T[0:Hout, 0:Hin] != 0) != (T[Hout*Wout:Hout*Wout+Hout, 0:Hin] != 0)).nnz == 0
             assert ((T[0:Hout, 0:Hin] != 0) != (T[0:Hout, Hin*Win:Hin*Win+Hin] != 0)).nnz == 0
 
@@ -707,10 +712,15 @@ class Conv2dTiledMatrix(TiledMatrix):
                     self._tiles = C._tiles  # unique per channel
                     self._uniqueblocks = [v[0] for (k,v) in groupbyasdict(C._blocks, lambda x: x[2]).items()]                    
                     self._blocks = [(i, j, k, (Hout*Wout, Hin*Win, len(self._tiles)), (Cout, Cin), 0) for (i,j,k) in C._blocks]  # repeated with stride                    
+                    self._channel_tiles = np.zeros( (Cout*Cin*len(self._tiles), np.max([t.nnz for t in self._tiles])), dtype=np.float32)  # data only
                 else:
-                    for (i, j, k) in self._uniqueblocks:
-                        self._tiles.append(self._tiletype(T[ib+i:ib+min(i+h, H), jb+j:jb+min(j+w, W)]))  # triggers copy, unavoidably slow
-                              
+                    t = T[ib+i:ib+min(i+h, H), jb+j:jb+min(j+w, W)].tocoo()
+                    for (k, (i, j, b)) in enumerate(self._uniqueblocks):
+                        #self._tiles.append(self._tiletype(T[ib+i:ib+min(i+h, H), jb+j:jb+min(j+w, W)]))  # triggers copy, unavoidably slow
+                        self._channel_tiles[cout*Cin*len(self._tiles) + cin*len(self._tiles) + k, 0:len(t.data)] = t.data
+                
+                T[ib+ie:jb:je] = 0  # free memory
+
         print('[TiledMatrix.init]: tile=%1.1f seconds' % sw.since())
 
         sw = Stopwatch()
@@ -728,6 +738,9 @@ class Conv2dTiledMatrix(TiledMatrix):
         self._blocks = sorted(self._blocks, key=lambda x: (x[0], x[1]))
         print('[TiledMatrix.init]: sort=%1.1f seconds' % sw.since())        
 
+
+    def nnz(self):
+        return sum([t.nnz for t in self._tiles]) + self._channel_tiles.size
         
 
     def __iter__(self):
