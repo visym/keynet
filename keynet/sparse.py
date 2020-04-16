@@ -118,7 +118,7 @@ def diagonal_affine_to_linear(A, bias=None, withinverse=False, dtype=np.float32)
         return L.astype(dtype)
     
 
-@numba.jit(nopython=True, parallel=False)
+@numba.jit(nopython=True, parallel=False, nogil=True)
 def _sparse_toeplitz_conv2d(inshape, f, as_correlation, stride):
     (C,U,V) = inshape
     (M,C,P,Q) = f.shape
@@ -149,13 +149,12 @@ def _sparse_toeplitz_conv2d(inshape, f, as_correlation, stride):
                     for (j,q) in enumerate(Q_range):
                         # For every outchannel
                         if ((v+q)>=0 and (v+q)<V):
-                            #c = np.ravel_multi_index( (c_inchannel, u+p, v+q), (C,U,V) )
                             c = c_inchannel*U*V + (u+p)*V + (v+q)
                             for (k_outchannel, c_outchannel) in enumerate(M_range):
-                                rows[k_entry] = int(c_outchannel*(U_div_stride)*(V_div_stride) + ku*(V_div_stride) + kv)
-                                cols[k_entry] = int(c)
-                                vals[k_entry] = float(f[k_outchannel,k_inchannel,i,j])
-                                k_entry += 1  # impure loop
+                                rows[k_entry+k_outchannel] = int(c_outchannel*(U_div_stride)*(V_div_stride) + ku*(V_div_stride) + kv)
+                                cols[k_entry+k_outchannel] = int(c)
+                                vals[k_entry+k_outchannel] = float(f[k_outchannel,k_inchannel,i,j])
+                            k_entry += k_outchannel  # impure loop
 
     return (rows[0:k_entry], cols[0:k_entry], vals[0:k_entry])
 
@@ -181,23 +180,24 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1,
 
     # Sparse matrix with optional bias and affine augmentation             
     (row_ind, col_ind, data) = _sparse_toeplitz_conv2d(inshape, f, as_correlation, stride)
-    data += 1.0  # preserve sparsity structure for zero coefficient elements
+    offset = np.abs(np.min(data))+1.0  # preserve sparsity structure for zero coefficient elements
+    data += offset  
     A = scipy.sparse.coo_matrix((data, (row_ind, col_ind)), shape=(M*(U//stride)*(V//stride), C*U*V))
-    A.data -= 1.0  # restore original weights 
+    A.data -= offset  # restore original weights
 
     # Optional bias and affine augmentation         
     if bias is not None:
         (C,U,V) = inshape                
         UV = (U//stride)*(V//stride)
-        (row, col, val) = zip(*[(i*UV+j, 0, x) for (i,x) in enumerate(bias) for j in range(0, UV)])
-        val += 1  # preserve sparsity structure 
+        offset = np.abs(np.min(bias)) + 1.0
+        (row, col, val) = zip(*[(i*UV+j, 0, x+offset) for (i,x) in enumerate(bias) for j in range(0, UV)])  # preserve sparsity structure (+1)
         lastcol = scipy.sparse.coo_matrix( (val, (row, col)), shape=(A.shape[0], 1))
-        lastcol.data -= 1  # restore original bias
+        lastcol.data -= offset  # restore original bias
         lastrow = scipy.sparse.coo_matrix( ([1], ([0], [A.shape[1]])), shape=(1, A.shape[1]+1), dtype=np.float32)
         A = scipy.sparse.vstack( (scipy.sparse.hstack( (A, lastcol)), lastrow) )            
 
     if format == 'csr':
-        A = A.tocsr()
+        A = A.tocsr()  # indices not sorted
     return A
 
 
@@ -481,7 +481,9 @@ class SparseMatrix(object):
         return scipy.sparse.coo_matrix.dot(self._matrix, np.matrix(x_numpy))
         
     def torchdot(self, x_torch):
-        assert self.is_torch_dense_float32(x_torch)
+        if not self.is_torch_dense_float32(x_torch):
+            warnings.warn('coercing to float32')
+            x_torch = x_torch.type(torch.FloatTensor)  # FIXME
         #if self.is_scipy_sparse(self._matrix):
         #    self._matrix = self._matrix.tocsr()
         return torch.as_tensor(scipy.sparse.coo_matrix.dot(self._matrix, np.matrix(x_torch.detach().numpy())))
@@ -529,7 +531,7 @@ class TiledMatrix(SparseMatrix):
         self.ndim = 2
 
         sw = Stopwatch()
-        T = T.tocoo()
+        T = T.tocoo()   # preserves sparsity
         (h,w) = tileshape
         (H,W) = self.shape        
         print('[TiledMatrix] tocoo=%1.1f' % sw.since())
@@ -552,7 +554,11 @@ class TiledMatrix(SparseMatrix):
             blockhash = hash(str(sorted(ijv, key=lambda x: (x[0], x[1])))+str(blockshape))
             if blockhash not in d_blockhash_to_index:
                 (row, col, val) = zip(*ijv)
-                self._tiles.append(self._tiletype(scipy.sparse.coo_matrix( (val, (row, col)), shape=blockshape)))
+                offset = np.abs(np.min(val))+1.0
+                val = np.array(val)+offset   # filter structure preserving
+                t = scipy.sparse.coo_matrix( (val, (row, col)), shape=blockshape)                
+                t.data -= offset  # weight preserving
+                self._tiles.append(self._tiletype(t))  # coo
                 d_blockhash_to_index[blockhash] = len(self._tiles)-1
             self._blocks.append( (bi*h, bj*w, d_blockhash_to_index[blockhash]) )
 
@@ -657,6 +663,11 @@ class DiagonalTiledMatrix(TiledMatrix):
         assert isinstance(shape, tuple) and len(shape) == 2, "invalid shape"
         if B.shape[0] > shape[0] or B.shape[1] > shape[1]:
             B = B.tocsr()[0:shape[0], 0:shape[1]]
+        if not scipy.sparse.issparse(B):
+            offset = np.abs(np.min(B))+1.0
+            B = scipy.sparse.coo_matrix(B+offset)
+            B.data -= offset  # sparsity preserving
+            B = B.tocsr()
 
         self._tileshape = B.shape
         self.shape = shape
@@ -679,7 +690,7 @@ class DiagonalTiledMatrix(TiledMatrix):
 
 
 class Conv2dTiledMatrix(TiledMatrix):    
-    def __init__(self, T, inshape, outshape, tileshape, bias):
+    def __init__(self, T, inshape, outshape, tileshape, bias, sanitycheck=True):
         (Cin, Hin, Win) = inshape
         (Cout, Hout, Wout) = outshape
         self._inshape = inshape
@@ -700,36 +711,34 @@ class Conv2dTiledMatrix(TiledMatrix):
         
         # Channel tile structure
         sw = Stopwatch()
-        T = T.tocsr()
+        T = T.tocsr()  # does not re-sparsify data, indices not sorted
         print('[TiledMatrix.init]: tocsr=%1.1f seconds' % sw.since())
 
-        # Sanity check: same sparsity structure across channels
-        if Cout > 1 and Cin > 1:
-            # FIXME: this check will fail if a filter coefficient is zero, requires sparsity preserving toeplitz matrix 
-            assert ((T[0:Hout, 0:Hin] != 0) != (T[Hout*Wout:Hout*Wout+Hout, 0:Hin] != 0)).nnz == 0
-            assert ((T[0:Hout, 0:Hin] != 0) != (T[0:Hout, Hin*Win:Hin*Win+Hin] != 0)).nnz == 0
+        # Sanity check: same sparsity structure across channels 
+        if sanitycheck and Cout > 1 and Cin > 1:
+            # Check only first two channels
+            # NOTE: this check will fail if a filter coefficient is zero, which requires sparsity preserving toeplitz matrix input
+            assert ((T[0:Hout*Wout, 0:Hin*Win] != 0) != (T[Hout*Wout:2*Hout*Wout, 0:Hin*Win] != 0)).nnz == 0
+            assert ((T[0:Hout*Wout, 0:Hin*Win] != 0) != (T[0:Hout*Wout, Hin*Win:2*Hin*Win] != 0)).nnz == 0
 
         sw = Stopwatch()
         ((H,W), (h,w)) = (self.shape, self._tileshape)
         for cout in range(0, Cout):
+            (ib, ie) = (cout*((Hout*Wout)), (cout+1)*(Hout*Wout))  # (ib,ie) == (row begin, row end) for channel cout
             for cin in range(0, Cin):
-                (ib, ie) = (cout*((Hout*Wout)), (cout+1)*(Hout*Wout))
-                (jb, je) = (cin*Hin*Win, (cin+1)*(Hin*Win))
+                (jb, je) = (cin*Hin*Win, (cin+1)*(Hin*Win))  # (jb, je) == (col begin, col end) for channel cin
                 if (cout == 0 and cin == 0):
-                    C = T[ib:ie, jb:je]
-                    C = TiledMatrix(C, tileshape)
+                    C = T[ib:ie, jb:je]  # csr, indices not sorted
+                    C = TiledMatrix(C, tileshape)  # preserves sparsity, indices not sorted, tiles coo
 
-                    self._tiles = C._tiles  # unique per channel
-                    self._uniqueblocks = [v[0] for (k,v) in groupbyasdict(C._blocks, lambda x: x[2]).items()]                    
-                    self._blocks = [(i, j, k, (Hout*Wout, Hin*Win, len(self._tiles)), (Cout, Cin), 0) for (i,j,k) in C._blocks]  # repeated with stride                    
-                    self._channel_tiles = np.zeros( (Cout*Cin*len(self._tiles), np.max([t.nnz for t in self._tiles])), dtype=np.float32)  # data only
-                else:
-                    t = T[ib+i:ib+min(i+h, H), jb+j:jb+min(j+w, W)].tocoo()
-                    for (k, (i, j, b)) in enumerate(self._uniqueblocks):
-                        #self._tiles.append(self._tiletype(T[ib+i:ib+min(i+h, H), jb+j:jb+min(j+w, W)]))  # triggers copy, unavoidably slow
-                        self._channel_tiles[cout*Cin*len(self._tiles) + cin*len(self._tiles) + k, 0:len(t.data)] = t.data
-                
-                T[ib+ie:jb:je] = 0  # free memory
+                    tiles = [t.tocsr().sorted_indices().tocoo() for t in C._tiles]  
+                    self._tiles = [(t.row, t.col, np.zeros( (Cout, Cin, len(t.data)), dtype=np.float32)) for t in tiles]
+                    self._blocks = C._blocks
+                    uniqueblocks = [v[0] for (k,v) in groupbyasdict(self._blocks, lambda x: x[2]).items()]
+                for (i,j,k) in uniqueblocks:
+                    t = self._tiles[k]
+                    for (kt, (it, jt)) in enumerate(zip(t[0], t[1])):  # (it,jt) == (row, column) offset within tile t
+                        self._tiles[k][2][cout, cin, kt] = T[ib+i+it, jb+j+jt]   # repeated index, channel-wise data 
 
         print('[TiledMatrix.init]: tile=%1.1f seconds' % sw.since())
 
@@ -737,9 +746,8 @@ class Conv2dTiledMatrix(TiledMatrix):
         # Bias tile structure
         if bias:
             B = TiledMatrix(T[:,-1], tileshape=(self._tileshape[0], 1))
-            #assert len(B.tiles()) <= Cout+1    # FIXME: why is this wrong?
-            self._blocks += [(i, Cin*Hin*Win, k, (0,0,0), (1,1), len(self._tiles)) for (i,j,k) in B._blocks]  # repeated tiles, FIXME: repeated structure 
-            self._tiles += B._tiles
+            self._blocks += [(i, Cin*Hin*Win, k+len(self._tiles)) for (i,j,k) in B._blocks]  # repeated tiles, FIXME: repeated structure 
+            self._tiles += [(t.row, t.col, np.array(t.data).reshape(1,1,len(t.data))) for t in B._tiles]
 
         print('[TiledMatrix.init]: bias=%1.1f seconds' % sw.since())
 
@@ -750,69 +758,49 @@ class Conv2dTiledMatrix(TiledMatrix):
 
 
     def nnz(self):
-        return sum([t.nnz for t in self._tiles]) + self._channel_tiles.size
+        return sum([t[2].size for t in self._tiles]) 
         
 
-    def __iter__(self):
-        """Iterator for ((bi,bj), b) tuples with blocks repeated across channels"""
-        for (i, j, k, (si,sj,sk), (Ni,Nj), k_tileoffset) in self._blocks:
-            for ni in range(0, Ni):  # row repetition 
-                for nj in range(0, Nj):  # col repetition 
-                    yield (i + si*ni, j + sj*nj, k + k_tileoffset + sk*(ni*Nj+nj))  # offset = stride*repetitions
-
     @staticmethod
-    @numba.jit(nopython=True, parallel=False)
-    def _tosparse(tiles, blocks):
+    @numba.jit(nopython=True, parallel=False, nogil=True)
+    def _tosparse(tiles, blocks, inshape, outshape):
 
         # Get memory size
         k_rcd = 0
-        #k_rcd_blockoffset = np.zeros(len(blocks), dtype=np.int64)
-        # <__iter__>
-        for (kb, (i, j, k, (si,sj,sk), (Ni,Nj), k_tileoffset)) in enumerate(blocks):
-            #k_rcd_blockoffset[kb] = k_rcd  # for parallelization
-            for ni in range(0, Ni):  # row repetition 
-                for nj in range(0, Nj):  # col repetition 
-                    kt = k + k_tileoffset + sk*(ni*Nj+nj)  # offset = stride*repetitions                    
-                    # </__iter__>
-                    k_rcd += len(tiles[kt][0])
+        for (kb, (i, j, k)) in enumerate(blocks):
+            k_rcd += tiles[k][2].size
 
         # Allocate memory (parallelizable)
         (rows, cols, data) = (np.zeros(k_rcd, dtype=np.int32), np.zeros(k_rcd, dtype=np.int32), np.zeros(k_rcd, dtype=np.float32))
 
         # Create sparse array indexes
-        kb = 0  # numba requirement?
-        k_rcd = 0  # numba requirement?
-        # <__iter__>
-        for kb in range(0, len(blocks)):   # parallelizable 
-            (i, j, k, (si,sj,sk), (Ni,Nj), k_tileoffset) = blocks[kb]
-            #k_rcd = int(k_rcd_blockoffset[kb])  # parallel loop offset
-            for ni in range(0, Ni):  # row repetition (parallel)
-                for nj in range(0, Nj):  # col repetition 
-                    (it, jt, kt) = (i + si*ni, j + sj*nj, k + k_tileoffset + sk*(ni*Nj+nj))  # offset = stride*repetitions                    
-                    # </__iter__>
-
-                    t = tiles[kt]
-                    n_rcd = len(t[0])
-                    for tk in range(0, n_rcd):
-                        rows[k_rcd] = it+t[0][tk]  
-                        cols[k_rcd] = jt+t[1][tk]
-                        data[k_rcd] = t[2][tk]
-                        k_rcd += 1  # impure loop, but offset is assigned in outer loop
-
+        k_rcd = 0
+        (Cout, Hout, Wout) = outshape        
+        (Cin, Hin, Win) = inshape
+        for kb in range(0, len(blocks)):   
+            (i, j, k) = blocks[kb]  # channel (0,0) spatial block offset 
+            t = tiles[k]  # repeated tile index
+            for (kt, (it, jt)) in enumerate(zip(t[0], t[1])):  # tile entries, relative to spatial block offset
+                for ic in range(0, t[2].shape[0]):              
+                    for jc in range(0, t[2].shape[1]):           
+                        rows[k_rcd] = i + it + ic*Hout*Wout  # block offset + tile offset + broadcast channel offset
+                        cols[k_rcd] = j + jt + jc*Hin*Win  # block offset + tile offset + broadcast channel offset
+                        data[k_rcd] = t[2][ic, jc, kt]  # channel broadcast
+                        k_rcd += 1  # impure loop
         return (rows, cols, data)
-
     
     def tosparse(self, format='coo'):
 
         # http://numba.pydata.org/numba-doc/latest/reference/deprecation.html#deprecation-of-reflection-for-list-and-set-types
         nb_tiles = numba.typed.List()
-        tiles = [t.tocoo() for t in self._tiles]  
-        [nb_tiles.append( (t.row, t.col, t.data) ) for t in tiles]
+        [nb_tiles.append(t) for t in self._tiles]
 
         nb_blocks = numba.typed.List()
         [nb_blocks.append(b) for b in self._blocks]
-        
-        (rows, cols, data) = self._tosparse(nb_tiles, nb_blocks)
+
+        assert all([t[2].shape[0:2] == (self._outshape[0], self._inshape[0]) or t[2].shape[0:2] == (1,1) for t in self._tiles])
+
+        (rows, cols, data) = self._tosparse(nb_tiles, nb_blocks, self._inshape, self._outshape)
 
         if format == 'csr':
             T = scipy.sparse.csr_matrix( (data, (rows, cols)), shape=self.shape)
@@ -822,5 +810,6 @@ class Conv2dTiledMatrix(TiledMatrix):
             T = scipy.sparse.csc_matrix( (data, (rows, cols)), shape=self.shape)
         else:
             raise ValueError('Invalid format "%s" - must be ["coo", "csr", "csc"]' % format)
-        return T            
+
+        return T
 

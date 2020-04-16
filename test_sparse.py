@@ -290,7 +290,7 @@ def test_sparse_matrix():
     W_torch = torch.as_tensor(W_numpy)
     x_torch = torch.as_tensor(x_numpy)
 
-    W_torch_sparse = keynet.torch.scipy_coo_to_torch_sparse(scipy.sparse.coo_matrix(W_numpy))    
+    W_torch_sparse = keynet.sparse.scipy_coo_to_torch_sparse(scipy.sparse.coo_matrix(W_numpy))    
     W_scipy = scipy.sparse.coo_matrix(W_numpy)
     
     A = keynet.sparse.SparseMatrix(W_numpy)

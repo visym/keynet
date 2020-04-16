@@ -35,7 +35,7 @@ class KeyedLayer(nn.Module):
             self.W = A.dot(self.W).dot(Ainv)  # Key!            
             print('[KeyedLayer]: conv2d dot=%f seconds' % sw.since())
             if tileshape is not None:
-                self.W = keynet.sparse.Conv2dTiledMatrix(self.W, self._inshape, self._outshape, self._tileshape, bias=True)
+                self.W = keynet.sparse.Conv2dTiledMatrix(self.W, self._inshape, self._outshape, self._tileshape, bias=True, sanitycheck=False)
             
         elif isinstance(module, nn.ReLU):
             raise ValueError('ReLU layer should be merged with previous layer')
