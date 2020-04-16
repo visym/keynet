@@ -154,18 +154,39 @@ class KeyedSensor(keynet.layer.KeyedLayer):
         
     def __repr__(self):
         return str('<KeySensor: height=%d, width=%d, channels=%d>' % (self._inshape[2], self._inshape[3], self._inshape[1]))
-    
-    def load(self, imgfile):
-        im = vipy.image.Image(imgfile).resize(height=self._inshape[2], width=self._inshape[3])
-        if self._inshape[1] == 1:
-            im = im.grey()
-        self._tensor = im.float().torch().contiguous()  # HxWxC -> 1xCxHxW
-        self._im = im
+
+    def save(self, outfile='/tmp/out.png'):
+        assert self.isencrypted()
+        x_numpy_linear = self._tensor.detach().numpy().transpose()
+        x_numpy_affine = x_numpy_linear.flatten()[:-1]
+        (A, Ainv) = keynet.sparse.mat2gray(x_numpy_affine)
+        x_torch_linear = torch.as_tensor(A.dot(x_numpy_linear)).t()
+        x_torch_affine = keynet.torch.linear_to_affine(x_torch_linear, self._inshape)
+        vipy.image.Image().fromtorch(x_torch_affine).colorspace('float').rgb().saveas(outfile)
+        return (outfile, self._decryptkey.dot(Ainv))
+        
+    def load(self, imgfile, imagekey=None):
+        im = vipy.image.Image(imgfile)        
+        if imagekey is not None:
+            if self._inshape[1] == 1:
+                im = im.red()  # one channel only, no scaling
+            assert (1, im.channels(), im.height(), im.width()) == self._inshape            
+            x_torch_affine = im.float().torch().contiguous()  # HxWxC -> 1xCxHxW                    
+            x_torch_linear = keynet.torch.affine_to_linear((1.0/255.0)*x_torch_affine)  # [0,255] -> [0,1]
+            x_numpy_linear = imagekey.dot(x_torch_linear.detach().numpy().transpose())  # DecryptKey*(1/mat2gray)
+            x_torch_linear = torch.as_tensor(x_numpy_linear).t()
+            self._tensor = keynet.torch.linear_to_affine(x_torch_linear, self._inshape)
+            self._im.fromtorch(self._tensor)            
+        else:
+            im = im.resize(height=self._inshape[2], width=self._inshape[3])
+            if self._inshape[1] == 1:
+                im = im.grey()            
+            self._im = im            
+            self._tensor = im.float().torch().contiguous()  # HxWxC -> 1xCxHxW        
         return self
 
     def fromimage(self, im):
-        im = im.resize(self._inshape[2], self._inshape[3])
-        assert (1, im.channels(), im.height(), im.width()) == self._inshape        
+        assert (1, im.channels(), im.height(), im.width()) == self._inshape                
         self._im = im
         self._tensor = im.float().torch().contiguous()
         return self
@@ -188,7 +209,11 @@ class KeyedSensor(keynet.layer.KeyedLayer):
         return im.rgb() if im.iscolor() else im.lum()  # uint8
     def toimage(self):
         return self.asimage()
-    
+
+    def show(self):
+        self.asimage().show()
+        return self
+        
     def keypair(self):
         return (self._encryptkey, self._decryptkey)
 
@@ -202,18 +227,16 @@ class KeyedSensor(keynet.layer.KeyedLayer):
     def isloaded(self):
         return self._tensor is not None
     
-    def encrypt(self, x_raw=None):
+    def encrypt(self):
         """img_tensor is NxCxHxW, return Nx(C*H*W+1) homogenized and encrypted"""
-        assert self.isloaded() or x_raw is not None, "Load image first"
-        self.fromtensor(x_raw)
+        assert self.isloaded(), "Load image first"
         if not self.isencrypted():
             self._tensor = self.forward(keynet.torch.affine_to_linear(self._tensor))
         return self
         
-    def decrypt(self, x_cipher=None):
+    def decrypt(self):
         """x_cipher is Nx(C*H*W+1) homogenized, convert to NxCxHxW decrypted"""
-        assert self.isloaded() or x_cipher is not None, "Load image first"        
-        self.fromtensor(x_cipher)        
+        assert self.isloaded(), "Load image first"
         if self.isencrypted():
             x_raw = super(KeyedSensor, self).decrypt(self._decryptkey, self._tensor)
             self._tensor = keynet.torch.linear_to_affine(x_raw, self._inshape)
@@ -399,10 +422,8 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         raise ValueError("Invalid local photometric transform '%s' - must be in '%s'" % (local_photometric, str(allowable_photometric)))                
     
     # Compose!
-    sw = Stopwatch()
     A = Cinv.dot(p.dot(g.dot(P.dot(G.dot(C)))))
     Ainv = Cinv.dot(Ginv.dot(Pinv.dot(ginv.dot(pinv.dot(C)))))
-    print('[keygen]: dot=%1.1f seconds' % sw.since())
     return (A, Ainv)
 
 
