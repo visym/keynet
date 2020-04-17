@@ -118,7 +118,7 @@ def diagonal_affine_to_linear(A, bias=None, withinverse=False, dtype=np.float32)
         return L.astype(dtype)
     
 
-@numba.jit(nopython=True, parallel=False, nogil=True)
+@numba.jit(nopython=True, parallel=False, nogil=False)
 def _sparse_toeplitz_conv2d(inshape, f, as_correlation, stride):
     (C,U,V) = inshape
     (M,C,P,Q) = f.shape
@@ -151,10 +151,10 @@ def _sparse_toeplitz_conv2d(inshape, f, as_correlation, stride):
                         if ((v+q)>=0 and (v+q)<V):
                             c = c_inchannel*U*V + (u+p)*V + (v+q)
                             for (k_outchannel, c_outchannel) in enumerate(M_range):
-                                rows[k_entry+k_outchannel] = int(c_outchannel*(U_div_stride)*(V_div_stride) + ku*(V_div_stride) + kv)
-                                cols[k_entry+k_outchannel] = int(c)
-                                vals[k_entry+k_outchannel] = float(f[k_outchannel,k_inchannel,i,j])
-                            k_entry += k_outchannel  # impure loop
+                                rows[k_entry] = int(c_outchannel*(U_div_stride)*(V_div_stride) + ku*(V_div_stride) + kv)
+                                cols[k_entry] = int(c)
+                                vals[k_entry] = float(f[k_outchannel,k_inchannel,i,j])
+                                k_entry += 1  # impure loop
 
     return (rows[0:k_entry], cols[0:k_entry], vals[0:k_entry])
 
@@ -198,6 +198,7 @@ def sparse_toeplitz_conv2d(inshape, f, bias=None, as_correlation=True, stride=1,
 
     if format == 'csr':
         A = A.tocsr()  # indices not sorted
+
     return A
 
 
@@ -371,8 +372,11 @@ def is_scipy_sparse(A):
 
 def coo_range(A, rowrange, colrange):
     (rows, cols, vals) = zip(*[(i-rowrange[0], j-colrange[0], v) for (i,j,v) in zip(A.row, A.col, A.data) if i>=rowrange[0] and i<rowrange[1] and j>=colrange[0] and j<colrange[1]])
-    return scipy.sparse.coo_matrix( (vals, (rows, cols) ), shape=(rowrange[1]-rowrange[0], colrange[1]-colrange[0]))
-
+    offset = np.abs(np.min(vals)) + 1.0  
+    vals += offset # preserve sparsity structure
+    T = scipy.sparse.coo_matrix( (vals, (rows, cols) ), shape=(rowrange[1]-rowrange[0], colrange[1]-colrange[0]))
+    T.data -= offset  # preserve weights
+    return T
 
 def spy(A, mindim=256, showdim=1024, range=None, eps=None):
     """Visualize sparse matrix A by resizing the block A[range[0]:range[1], range[0]:range[1]] to (mindim, mindim) then upsapling to (showdim,showdim) and return a vipy.image.Image().
@@ -663,7 +667,7 @@ class DiagonalTiledMatrix(TiledMatrix):
         assert isinstance(shape, tuple) and len(shape) == 2, "invalid shape"
         if B.shape[0] > shape[0] or B.shape[1] > shape[1]:
             B = B.tocsr()[0:shape[0], 0:shape[1]]
-        if not scipy.sparse.issparse(B):
+        if not scipy.sparse.issparse(B): 
             offset = np.abs(np.min(B))+1.0
             B = scipy.sparse.coo_matrix(B+offset)
             B.data -= offset  # sparsity preserving
@@ -690,6 +694,35 @@ class DiagonalTiledMatrix(TiledMatrix):
 
 
 class Conv2dTiledMatrix(TiledMatrix):    
+
+    @staticmethod
+    @numba.jit(nopython=True)
+    def __tiler__(T_rows, T_cols, T_data, blocks, inshape, outshape, shape, tileshape):
+        (Cin, Hin, Win) = inshape
+        (Cout, Hout, Wout) = outshape
+        ((H,W), (h,w)) = (shape, tileshape)
+
+        d_blockloc_to_tileindex = dict()
+        d_tileindex_to_channels = dict()
+
+        for (ib,jb,kt) in blocks:
+            d_blockloc_to_tileindex[(ib,jb)] = kt
+            d_tileindex_to_channels[(0,0,kt)] = np.zeros( (Cout, Cin), dtype=np.float32)
+
+        for k in range(0, len(T_rows)):
+            (i, j, v) = (T_rows[k], T_cols[k], T_data[k])
+            (ib, jb) = (int(h*((i % (Hout*Wout))//h)), int(w*((j % (Hin*Win))//w)))  # block index
+            if (ib, jb) in d_blockloc_to_tileindex:
+                kt = d_blockloc_to_tileindex[(ib, jb)]
+                (it, jt) = ((i % (Hout*Wout))-ib, (j % (Hin*Win))-jb)
+                if (it,jt,kt) not in d_tileindex_to_channels:
+                    d_tileindex_to_channels[(int(it),int(jt),int(kt))] = np.zeros( (Cout, Cin), dtype=np.float32)
+                (ic, jc) = (i // (Hout*Wout), j // (Hin*Win))  # channel index
+                d_tileindex_to_channels[(int(it),int(jt),int(kt))][ic, jc] = float(v)
+
+        return d_tileindex_to_channels
+
+
     def __init__(self, T, inshape, outshape, tileshape, bias, sanitycheck=True):
         (Cin, Hin, Win) = inshape
         (Cout, Hout, Wout) = outshape
@@ -710,45 +743,44 @@ class Conv2dTiledMatrix(TiledMatrix):
             assert self.shape[0] % tileshape[0] == 0 and self.shape[1] % tileshape[1] == 0            
         
         # Channel tile structure
-        sw = Stopwatch()
-        T = T.tocsr()  # does not re-sparsify data, indices not sorted
-        print('[TiledMatrix.init]: tocsr=%1.1f seconds' % sw.since())
+        T_00 = T[0:Hout*Wout, 0:Hin*Win]  # should already be indexable (csr)
 
         # Sanity check: same sparsity structure across channels 
         if sanitycheck and Cout > 1 and Cin > 1:
             # Check only first two channels
             # NOTE: this check will fail if a filter coefficient is zero, which requires sparsity preserving toeplitz matrix input
-            assert ((T[0:Hout*Wout, 0:Hin*Win] != 0) != (T[Hout*Wout:2*Hout*Wout, 0:Hin*Win] != 0)).nnz == 0
-            assert ((T[0:Hout*Wout, 0:Hin*Win] != 0) != (T[0:Hout*Wout, Hin*Win:2*Hin*Win] != 0)).nnz == 0
+            T_10 = T[Hout*Wout:2*Hout*Wout, 0:Hin*Win]
+            T_01 = T[0:Hout*Wout, Hin*Win:2*Hin*Win]
+            assert ((T_00 != 0) != (T_10 != 0)).nnz == 0
+            assert ((T_00 != 0) != (T_01 != 0)).nnz == 0
 
-        sw = Stopwatch()
-        ((H,W), (h,w)) = (self.shape, self._tileshape)
-        for cout in range(0, Cout):
-            (ib, ie) = (cout*((Hout*Wout)), (cout+1)*(Hout*Wout))  # (ib,ie) == (row begin, row end) for channel cout
-            for cin in range(0, Cin):
-                (jb, je) = (cin*Hin*Win, (cin+1)*(Hin*Win))  # (jb, je) == (col begin, col end) for channel cin
-                if (cout == 0 and cin == 0):
-                    C = T[ib:ie, jb:je]  # csr, indices not sorted
-                    C = TiledMatrix(C, tileshape)  # preserves sparsity, indices not sorted, tiles coo
+        # Tile reference
+        C = TiledMatrix(T_00, tileshape)  # preserves sparsity, indices not sorted, tiles coo
+        self._blocks = C._blocks
 
-                    tiles = [t.tocsr().sorted_indices().tocoo() for t in C._tiles]  
-                    self._tiles = [(t.row, t.col, np.zeros( (Cout, Cin, len(t.data)), dtype=np.float32)) for t in tiles]
-                    self._blocks = C._blocks
-                    uniqueblocks = [v[0] for (k,v) in groupbyasdict(self._blocks, lambda x: x[2]).items()]
-                for (i,j,k) in uniqueblocks:
-                    t = self._tiles[k]
-                    for (kt, (it, jt)) in enumerate(zip(t[0], t[1])):  # (it,jt) == (row, column) offset within tile t
-                        self._tiles[k][2][cout, cin, kt] = T[ib+i+it, jb+j+jt]   # repeated index, channel-wise data 
+        nb_blocks = numba.typed.List()
+        [nb_blocks.append(b) for b in self._blocks]
 
-        print('[TiledMatrix.init]: tile=%1.1f seconds' % sw.since())
-
-        sw = Stopwatch()
-        # Bias tile structure
         if bias:
-            B = TiledMatrix(T[:,-1], tileshape=(self._tileshape[0], 1))
-            self._blocks += [(i, Cin*Hin*Win, k+len(self._tiles)) for (i,j,k) in B._blocks]  # repeated tiles, FIXME: repeated structure 
-            self._tiles += [(t.row, t.col, np.array(t.data).reshape(1,1,len(t.data))) for t in B._tiles]
+            T_lastcol = T[:,-1]
+            T = T[0:-1, 0:-1]  # FIXME: Yuck..
 
+        sw = Stopwatch()
+        T = T.tocoo()  # expensive
+        nb_tiles = self.__tiler__(T.row, T.col, T.data, nb_blocks, inshape, outshape, T.shape, tileshape)
+        print('[TiledMatrix.init]: tocoo+tile=%1.1f seconds' % sw.since())
+
+        self._tiles = {(i,j,k):v for ((i,j,k),v) in nb_tiles.items()}  # numba to python
+        
+        sw = Stopwatch()
+        # Bias tile structure        
+        if bias:
+            B = TiledMatrix(T_lastcol, tileshape=(self._tileshape[0], 1))
+            k_offset = len(self._tiles)
+            for (kt, t) in enumerate(B._tiles):
+                for (i,j,v) in zip(t.row, t.col, t.data):
+                    self._tiles[(int(i), int(j), int(k_offset+kt))] = np.array(v).reshape(1,1).astype(np.float32)
+            self._blocks += [(i, Cin*Hin*Win, k_offset+k) for (i,j,k) in B._blocks]  # repeated tiles, FIXME: repeated structure 
         print('[TiledMatrix.init]: bias=%1.1f seconds' % sw.since())
 
         # Rowmajor order
@@ -756,19 +788,22 @@ class Conv2dTiledMatrix(TiledMatrix):
         self._blocks = sorted(self._blocks, key=lambda x: (x[0], x[1]))
         print('[TiledMatrix.init]: sort=%1.1f seconds' % sw.since())        
 
-
     def nnz(self):
-        return sum([t[2].size for t in self._tiles]) 
+        return sum([v.size for ((i,j,k),v) in self._tiles.items()])
         
-
     @staticmethod
-    @numba.jit(nopython=True, parallel=False, nogil=True)
-    def _tosparse(tiles, blocks, inshape, outshape):
+    @numba.jit(nopython=True, parallel=False, nogil=False)
+    def _tosparse(blocks, tiles, inshape, outshape):
 
         # Get memory size
+        d_tileindex_to_size = dict()
+        for ((i, j, k), v) in tiles.items():  
+            if k not in d_tileindex_to_size:
+                d_tileindex_to_size[k] = 0
+            d_tileindex_to_size[k] += v.size
         k_rcd = 0
-        for (kb, (i, j, k)) in enumerate(blocks):
-            k_rcd += tiles[k][2].size
+        for (i, j, k) in blocks:
+            k_rcd += d_tileindex_to_size[k]
 
         # Allocate memory (parallelizable)
         (rows, cols, data) = (np.zeros(k_rcd, dtype=np.int32), np.zeros(k_rcd, dtype=np.int32), np.zeros(k_rcd, dtype=np.float32))
@@ -779,28 +814,28 @@ class Conv2dTiledMatrix(TiledMatrix):
         (Cin, Hin, Win) = inshape
         for kb in range(0, len(blocks)):   
             (i, j, k) = blocks[kb]  # channel (0,0) spatial block offset 
-            t = tiles[k]  # repeated tile index
-            for (kt, (it, jt)) in enumerate(zip(t[0], t[1])):  # tile entries, relative to spatial block offset
-                for ic in range(0, t[2].shape[0]):              
-                    for jc in range(0, t[2].shape[1]):           
-                        rows[k_rcd] = i + it + ic*Hout*Wout  # block offset + tile offset + broadcast channel offset
-                        cols[k_rcd] = j + jt + jc*Hin*Win  # block offset + tile offset + broadcast channel offset
-                        data[k_rcd] = t[2][ic, jc, kt]  # channel broadcast
-                        k_rcd += 1  # impure loop
+            for (it, jt, kt) in tiles:  # repeated tile index
+                if kt == k:  # yuck, search
+                    v = tiles[(it,jt,kt)]
+                    for ic in range(0, v.shape[0]):              
+                        for jc in range(0, v.shape[1]):           
+                            rows[k_rcd] = i + it + (ic*Hout*Wout)  # block offset + tile offset + broadcast channel offset
+                            cols[k_rcd] = j + jt + (jc*Hin*Win)  # block offset + tile offset + broadcast channel offset
+                            data[k_rcd] = float(v[ic, jc])  # channel broadcast
+                            k_rcd += 1  # impure loop
+
         return (rows, cols, data)
     
     def tosparse(self, format='coo'):
-
         # http://numba.pydata.org/numba-doc/latest/reference/deprecation.html#deprecation-of-reflection-for-list-and-set-types
-        nb_tiles = numba.typed.List()
-        [nb_tiles.append(t) for t in self._tiles]
-
         nb_blocks = numba.typed.List()
         [nb_blocks.append(b) for b in self._blocks]
 
-        assert all([t[2].shape[0:2] == (self._outshape[0], self._inshape[0]) or t[2].shape[0:2] == (1,1) for t in self._tiles])
+        nb_tiles = numba.typed.Dict()        
+        for ((i,j,k),v) in self._tiles.items():
+            nb_tiles[(i,j,k)] = v  # python to numba
 
-        (rows, cols, data) = self._tosparse(nb_tiles, nb_blocks, self._inshape, self._outshape)
+        (rows, cols, data) = self._tosparse(nb_blocks, nb_tiles, self._inshape, self._outshape)
 
         if format == 'csr':
             T = scipy.sparse.csr_matrix( (data, (rows, cols)), shape=self.shape)

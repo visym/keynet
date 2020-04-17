@@ -38,16 +38,15 @@ def test_tiled_keynet():
     inshape = (1,28,28)
     x = torch.randn(1, *inshape)
     net = keynet.mnist.LeNet_AvgPool()
+    (sensor, knet) = keynet.system.Keynet(inshape, net, backend='scipy', tileshape=None)
+    (sensor, knet_tiled) = keynet.system.Keynet(inshape, net, backend='scipy', tileshape=(28,28))
 
-    (sensor, knet) = keynet.system.Keynet(inshape, net, backend='scipy', tileshape=(28,28))
+    yh = knet.forward(sensor.fromtensor(x).encrypt().astensor()).detach().numpy().flatten()
+    y = net.forward(x).detach().numpy().flatten()
+    print(yh,y)
     assert np.allclose(knet.forward(sensor.fromtensor(x).encrypt().astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)
     print('[test_keynet]:  tiled IdentityKeynet PASSED')    
     
-    #(sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, tileshape=(14,14))
-    #assert np.allclose(knet.forward(sensor.fromtensor(x).encrypt().astensor()).detach().numpy().flatten(), net.forward(x).detach().numpy().flatten(), atol=1E-5)    
-    #print('[test_keynet]:  tiled PermutationKeynet PASSED')
-    
-
 def test_permutation_keynet():
     inshape = (1,28,28)
     x = torch.randn(1, *inshape)
@@ -222,7 +221,6 @@ def test_vgg16_identity():
 
     yh = knet.forward(sensor.fromtensor(x).encrypt().astensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
-    import pdb; pdb.set_trace()
     assert np.allclose(yh, y, atol=1E-3)
     print('vgg16: keynet-56 num parameters=%d' % knet.num_parameters())
 
@@ -292,6 +290,8 @@ def test_lenet_orthogonal():
                                           local_photometric='uniform_random_affine', beta=1.0, gamma=1.0,
                                           memoryorder='block')
 
+    print(vipy.util.save((sensor, knet), 'test_lenet_orthogonal.pkl'))
+
     yh = knet.forward(sensor.fromtensor(x).encrypt().astensor()).detach().numpy().flatten()
     y = net.forward(x).detach().numpy().flatten()
     
@@ -332,10 +332,13 @@ if __name__ == '__main__':
     #test_keynet_mnist()
 
     if len(sys.argv) == 1:
-        test_identity_keynet()
         test_tiled_keynet()
+        test_identity_keynet()
         test_permutation_keynet()
         test_photometric_keynet()
+
+
+
 
     elif sys.argv[1] == 'vgg16-identity-tiled':
         test_vgg16_identity_tiled()
