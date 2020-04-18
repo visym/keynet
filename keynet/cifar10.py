@@ -11,7 +11,9 @@ import multiprocessing
 
 class AllConvNet(nn.Module):
     """https://github.com/StefOe/all-conv-pytorch/blob/master/cifar10.ipynb"""
-    def __init__(self, n_input_channels=3, n_classes=10, **kwargs):
+    def __init__(self, batchnorm=False, n_input_channels=3, n_classes=10, **kwargs):
+        self._batchnorm = batchnorm
+
         super(AllConvNet, self).__init__()
         self.dropout0 = nn.Dropout(p=0.2) 
         self.conv1 = nn.Conv2d(n_input_channels, 96, 3, padding=1)
@@ -19,7 +21,8 @@ class AllConvNet(nn.Module):
         self.conv2 = nn.Conv2d(96, 96, 3, padding=1)
         self.relu2 = nn.ReLU()
         self.conv3 = nn.Conv2d(96, 96, 3, padding=1, stride=2)
-        self.conv3_bn = nn.BatchNorm2d(96)   # Necessary to get this to train!
+        if batchnorm:
+            self.conv3_bn = nn.BatchNorm2d(96)   # Necessary to get this to train!
         self.dropout3 = nn.Dropout(p=0.5)
         self.relu3 = nn.ReLU()
         self.conv4 = nn.Conv2d(96, 192, 3, padding=1)
@@ -27,7 +30,8 @@ class AllConvNet(nn.Module):
         self.conv5 = nn.Conv2d(192, 192, 3, padding=1)
         self.relu5 = nn.ReLU()
         self.conv6 = nn.Conv2d(192, 192, 3, padding=1, stride=2)
-        self.conv6_bn = nn.BatchNorm2d(192)  # required naming convention 'xyz_bn'        
+        if batchnorm:
+            self.conv6_bn = nn.BatchNorm2d(192)  # required naming convention 'xyz_bn'        
         self.dropout6 = nn.Dropout(p=0.5) 
         self.relu6 = nn.ReLU()
         self.conv7 = nn.Conv2d(192, 192, 3, padding=1)
@@ -45,12 +49,12 @@ class AllConvNet(nn.Module):
         conv1_out = self.relu1(self.conv1(x_drop))           # (3,32,32) -> (96,32,32)
         conv2_out = self.relu2(self.conv2(conv1_out))        # (96,32,32) -> (96,32,32)
         conv3_out = self.conv3(conv2_out)                    # (96,32,32) -> (96,16,16)
-        conv3_out_bn = self.conv3_bn(conv3_out)              #
+        conv3_out_bn = self.conv3_bn(conv3_out) if self._batchnorm else conv3_out
         conv3_out_drop = self.relu3(self.dropout3(conv3_out_bn)) 
         conv4_out = self.relu4(self.conv4(conv3_out_drop))   # (96,16,16) -> (192,16,16)
         conv5_out = self.relu5(self.conv5(conv4_out))        # (192,16,16) -> (192,16,16) 
         conv6_out = self.conv6(conv5_out)                    # (192,16,16) -> (192,8,8) 
-        conv6_out_bn = self.conv6_bn(conv6_out)              # 
+        conv6_out_bn = self.conv6_bn(conv6_out) if self._batchnorm else conv6_out
         conv6_out_drop = self.relu6(self.dropout6(conv6_out_bn)) 
         conv7_out = self.relu7(self.conv7(conv6_out_drop))   # (192,8,8) -> (192,8,8)
         conv8_out = self.relu8(self.conv8(conv7_out))        # (192,8,8) -> (192,8,8)

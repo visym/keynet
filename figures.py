@@ -325,6 +325,8 @@ def train_cifar10_allconv_fiberbundle(do_mean_estimation=True, cifardir='/proj/e
 
 
 def print_parameters():
+    keynet.globals.verbose(False)
+
     inshape = (1,28,28)
     net = keynet.mnist.LeNet_AvgPool()
     net.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'));
@@ -336,27 +338,32 @@ def print_parameters():
     (sensor, knet) = keynet.system.PermutationKeynet(inshape, net)
     print('[figures.print_parameters]:  PermutationKeynet (lenet) parameters=%d' % (knet.num_parameters()))        
 
+    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, 2)
+    print('[figures.print_parameters]:  TiledPermutationKeynet-2 (lenet) parameters=%d' % (knet.num_parameters()))        
+
     (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, 4)
-    print('[figures.print_parameters]:  TiledPermutationKeynet (lenet) parameters=%d' % (knet.num_parameters()))        
+    print('[figures.print_parameters]:  TiledPermutationKeynet-4 (lenet) parameters=%d' % (knet.num_parameters()))        
+
+    (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, 8)
+    print('[figures.print_parameters]:  TiledPermutationKeynet-8 (lenet) parameters=%d' % (knet.num_parameters()))        
 
     inshape = (3,32,32)
-    net = keynet.cifar10.AllConvNet()    
-    net.load_state_dict(torch.load('./models/cifar10_allconv.pth', map_location=torch.device('cpu')));
+    net = keynet.cifar10.AllConvNet(batchnorm=False)    
     print('[figures.print_parameters]:  allconvnet parameters=%d' % (keynet.torch.count_parameters(net)))
     
-    keynet.globals.num_processes(48)
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)    
     print('[figures.print_parameters]:  IdentityKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))
 
-    keynet.globals.num_processes(48)
     (sensor, knet) = keynet.system.PermutationKeynet(inshape, net)    
     print('[figures.print_parameters]:  PermutationKeynet (allconvnet) parameters=%d' % (knet.num_parameters()))
 
-    keynet.globals.num_processes(48)
-    (sensor, knet) = keynet.system.TiledIdentityKeynet(inshape, net, 8)
-    print('[figures.print_parameters]:  TiledIdentityKeynet-8 (allconvnet) parameters=%d' % (knet.num_parameters()))        
+    for k in [2,4,8,16]:
+        (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, k)
+        print('[figures.print_parameters]:  TiledPermutationKeynet-%d (allconvnet) parameters=%d' % (k, knet.num_parameters()))        
 
-    return (sensor, knet)
+    for k in [2,4,8,16]:
+        (sensor, knet) = keynet.system.TiledOrthogonalKeynet(inshape, net, k)
+        print('[figures.print_parameters]:  TiledOrthogonalKeynet-%d (allconvnet) parameters=%d' % (k, knet.num_parameters()))        
 
 if __name__ == '__main__':
     print_parameters()

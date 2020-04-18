@@ -602,8 +602,8 @@ class TiledMatrix(SparseMatrix):
         if not self.is_numpy_dense(x):
             x = x.detach().numpy()
 
-        W = self.tocsr()   # slow for large matrices
-        y = W.dot(x).astype(np.float32)  # MKL multi-threaded with scipy-intel package
+        W = self.tocsr()   # slow for large matrices, garbage collected
+        y = W.dot(x).astype(np.float32)  # MKL multi-threaded with scipy-intel package for fast sparse matrix multiplication
         return torch.as_tensor(y) 
                         
     def transpose(self):

@@ -20,6 +20,7 @@ from keynet.util import blockview
 from keynet.globals import verbose
 import copy 
 from vipy.util import Stopwatch
+import warnings
 
 
 class KeyedModel(object):
@@ -28,6 +29,17 @@ class KeyedModel(object):
         net.eval()
         netshape = keynet.torch.netshape(net, inshape)
         
+        # Remove identity layers from keying (doubly linked list - delete node)
+        identity_layers = ['dropout']
+        for prefix in identity_layers:
+            netshape = {k:v for (k,v) in netshape.items() if k not in prefix}  # remove identity layer
+            for (k,v) in netshape.items():
+                if v['nextlayer'] is not None and prefix in v['nextlayer']:
+                    v['nextlayer'] = netshape[v['nextlayer']]['nextlayer']  # bypass next layer
+                elif v['prevlayer'] is not None and prefix in v['prevlayer']:
+                    v['prevlayer'] = netshape[v['prevlayer']]['prevlayer']  # bypass prev layer
+
+        # Generate keypairs
         (i,o) = (netshape['input']['nextlayer'], netshape['output']['prevlayer'])              
         layerkey = {k:{'outkeypair':f_layername_to_keypair(k, v['outshape']),
                        'prevlayer':v['prevlayer']}
@@ -64,31 +76,34 @@ class KeyedModel(object):
 
                 # Replace module k_prev with fused weights, do not include batchnorm in final network
                 (m_prev.weight, m_prev.bias) = (torch.nn.Parameter(bn_weight), torch.nn.Parameter(bn_bias))
-                B = layerkey[k]['A'].dot(layerkey[k]['Ainv'])  
+                B = layerkey[k]['A'].dot(layerkey[k]['Ainv'])  # use batchnorm outkey
                 d_name_to_keyedmodule[k_prev] = f_module_to_keyedmodule(m_prev, netshape[k_prev]['inshape'], netshape[k]['outshape'], B.dot(layerkey[k_prev]['A']), layerkey[k_prev]['Ainv'])
                 if verbose():
                     print('[keynet.layers.KeyNet]:     %s' % str(d_name_to_keyedmodule[k_prev]))
-                    print('[keynet.layers.KeyNet]:     %s' % str(d_name_to_keyedmodule[k]))
+                    print('[keynet.layers.KeyNet]:     %s' % k)
 
             elif isinstance(m, nn.ReLU):
                 # Apply key to previous layer (which was skipped) and make this layer unkeyed, forward is ReLU only
                 k_prev = netshape[k]['prevlayer']
-                
-                m_prev = getattr(net, k_prev)
-                B = layerkey[k]['A'].dot(layerkey[k]['Ainv'])
-                d_name_to_keyedmodule[k_prev] = f_module_to_keyedmodule(m_prev, netshape[k_prev]['inshape'], netshape[k_prev]['outshape'], B.dot(layerkey[k_prev]['A']), layerkey[k_prev]['Ainv'])                
-                d_name_to_keyedmodule[k] = copy.deepcopy(m)  # unkeyed, ReLU only
-                if verbose():
-                    print('[keynet.layers.KeyNet]:     %s' % str(d_name_to_keyedmodule[k_prev]))
-                    print('[keynet.layers.KeyNet]:     %s' % str(d_name_to_keyedmodule[k]))
+                if '_bn' not in k_prev:
+                    m_prev = getattr(net, k_prev)
+                    B = layerkey[k]['A'].dot(layerkey[k]['Ainv'])  # use relu outkey
+                    d_name_to_keyedmodule[k_prev] = f_module_to_keyedmodule(m_prev, netshape[k_prev]['inshape'], netshape[k_prev]['outshape'], B.dot(layerkey[k_prev]['A']), layerkey[k_prev]['Ainv'])                
+                    d_name_to_keyedmodule[k] = copy.deepcopy(m)  # unkeyed, ReLU only
+                    if verbose():
+                        print('[keynet.layers.KeyNet]:     %s' % str(d_name_to_keyedmodule[k_prev]))
+                        print('[keynet.layers.KeyNet]:     %s' % str(d_name_to_keyedmodule[k]))
+                else:
+                    # If previous layer is batchnorm, then we need to include an explicit ReLU layer, this is expensive
+                    warnings.warn('Keying ReLU since previous layer "%s" is already keyed - Avoid sequential batchnorm and ReLU layers for efficient keying' % k_prev)
+                    d_name_to_keyedmodule[k] = f_module_to_keyedmodule(m, netshape[k]['inshape'], netshape[k]['outshape'], layerkey[k]['A'], layerkey[k]['Ainv'])                
+                    if verbose():
+                        print('[keynet.layers.KeyNet]:     %s' % str(d_name_to_keyedmodule[k]))
 
             elif isinstance(m, nn.Dropout):    
-                k_next = netshape[k]['nextlayer']
-                assert k_next is not None, "Dropout cannot be last layer"
-                layerkey[k_next]['Ainv'] = layerkey[k]['Ainv']  # propagate last layer key to next layer
                 if verbose():
-                    print('[keynet.layers.KeyNet]:     Skipping %s and propagating key to %s' % (k, k_next))
-                pass  # Dropout is identity in final eval() network, so key assignment skips dropout and removes from network
+                    print('[keynet.layers.KeyNet]:     Skipping...')
+                pass  # Dropout is identity in final eval() network, so key assignment skips dropout and removes from keyed network
 
             elif netshape[k]['nextlayer'] is not None and (('%s_bn' % k) == netshape[k]['nextlayer'] or 'relu' in netshape[k]['nextlayer']):                
                 pass  # Key this layer by merging with next layer 
@@ -97,7 +112,7 @@ class KeyedModel(object):
                 if verbose():
                     print('[keynet.layers.KeyNet]:     %s' % str(d_name_to_keyedmodule[k]))
 
-        self._keynet = nn.Sequential(d_name_to_keyedmodule)
+        self._keynet = nn.Sequential(d_name_to_keyedmodule)  # layers in insertion order
         self._embeddingkey = layerkey['output']
         self._imagekey = layerkey['input']
         self._layernames = layernames
@@ -263,7 +278,7 @@ def layergen(module, inshape, outshape, A, Ainv, tileshape=None, backend='scipy'
     if tileshape is not None:
         new_tileshape = (keynet.util.find_closest_positive_divisor(outshape[1], tileshape[0]),  # force non-ragged spatial tileshape
                          keynet.util.find_closest_positive_divisor(inshape[1], tileshape[1])) 
-        if new_tileshape != tileshape:
+        if verbose() and new_tileshape != tileshape:
             print('[layergen]: Ragged spatial tileshape=%s, forcing non-ragged tileshape "%s" for inshape="%s", outshape="%s"' % (str(tileshape), str(new_tileshape), str(inshape), str(outshape)))
         tileshape = new_tileshape
 
@@ -295,7 +310,8 @@ def keygen(shape, global_geometric, local_geometric, global_photometric, local_p
         elif not strict and (height % blocksize != 0 or width % blocksize != 0):
             assert height == width, "Image must be square to correct ragged blocksize"
             new_blocksize = keynet.util.find_closest_positive_divisor(height, blocksize)  # force evenly divisible, if possible
-            print('[keynet.system]: Ragged blocksize %d for image shape %s, setting blocksize=%d' % (blocksize, str((height, width)), new_blocksize))
+            if verbose():
+                print('[keynet.system]: Ragged blocksize %d for image shape %s, setting blocksize=%d' % (blocksize, str((height, width)), new_blocksize))
             blocksize = new_blocksize
             H = height*width  # channel repeated transformation
             blocknumel = blocksize*blocksize  # spatially repeated transformation
@@ -457,10 +473,15 @@ def TiledIdentityKeynet(inshape, net, tilesize):
 
 
 def TiledPermutationKeynet(inshape, net, tilesize):
-    return Keynet(inshape, net, global_geometric='permutation', backend='scipy', tileshape=(tilesize, tilesize))
+    return Keynet(inshape, net, local_geometric='permutation', backend='scipy', tileshape=(tilesize, tilesize), blocksize=tilesize)
 
-
-
+def TiledOrthogonalKeynet(inshape, net, tilesize, hierarchical_permute_at_level=(0,1)):
+    return Keynet(inshape, net, tileshape=(tilesize, tilesize), 
+                  global_geometric='hierarchical_permutation', hierarchical_blockshape=(2,2), hierarchical_permute_at_level=hierarchical_permute_at_level,
+                  global_photometric='identity',
+                  local_geometric='givens_orthogonal', alpha=tilesize, blocksize=tilesize,
+                  local_photometric='uniform_random_affine', beta=0.1, gamma=100.0,
+                  memoryorder='block')
 
 def OpticalFiberBundleKeynet(inshape, net):
     f_keypair = keygen('identity', 'scipy')  # FIXME
