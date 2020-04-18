@@ -31,12 +31,12 @@ class KeyedLayer(nn.Module):
             sw = Stopwatch()
             self.W = sparse_toeplitz_conv2d(inshape, module.weight.detach().numpy(), bias=module.bias.detach().numpy(), stride=module.stride[0])            
             print('[KeyedLayer]: sparse_toeplitz_conv2d=%1.1f seconds' % sw.since())
-            sw = Stopwatch()
             self.W = A.dot(self.W).dot(Ainv)  # Key!            
             print('[KeyedLayer]: conv2d dot=%1.1f seconds' % sw.since())
             if tileshape is not None:
                 self.W = keynet.sparse.Conv2dTiledMatrix(self.W, self._inshape, self._outshape, self._tileshape, bias=True, sanitycheck=False)
-            
+                print('[KeyedLayer]: conv2d tiled=%1.1f seconds' % sw.since())
+
         elif isinstance(module, nn.ReLU):
             raise ValueError('ReLU layer should be merged with previous layer')
 
@@ -50,11 +50,11 @@ class KeyedLayer(nn.Module):
             sw = Stopwatch()
             self.W = sparse_toeplitz_avgpool2d(inshape, (inshape[0], inshape[0], kernel_size, kernel_size), stride)
             print('[KeyedLayer]: sparse_toeplitz_conv2d=%1.1f seconds' % sw.since())
-            sw = Stopwatch()
             self.W = A.dot(self.W).dot(Ainv) if A is not None else self.W.dot(Ainv)  # optional outkey
             print('[KeyedLayer]: avgpool2d dot=%1.1f seconds' % sw.since())
             if tileshape is not None:
                 self.W = keynet.sparse.TiledMatrix(self.W, self._tileshape)
+                print('[KeyedLayer]: avgpool2d tiled=%1.1f seconds' % sw.since())
             
         elif isinstance(module, nn.Linear):
             self._repr = 'Linear: in_features=%d, out_features=%d' % (module.in_features, module.out_features)

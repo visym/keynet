@@ -126,17 +126,7 @@ def test_sparse_tiled_matrix():
     W_right = sparse_toeplitz_conv2d( (2,U,V), 0*np.random.rand(4,2,3,3), bias=1000*np.ones(4).astype(np.float32), stride=1).astype(np.float32)
     W_right_dense = W_right.todense().astype(np.float32)
     T_right = keynet.sparse.Conv2dTiledMatrix(W_right, inshape=(2,U,V), outshape=(4,U,V), tileshape=(4, 4), bias=True)
-    #T_right = keynet.sparse.Conv2dTiledMatrix(W_right.tocsr()[0:-1, 0:-1], inshape=(2,U,V), outshape=(4,U,V), tileshape=(4, 4), bias=False)
-    #assert np.allclose(T_right.tocoo().tocsr().todense(), W_right_dense[0:-1, 0:-1], atol=1E-5)    
-    #assert np.allclose(T_right.tocoo().tocsr().todense(), W_right_dense[0:-1, 0:-1], atol=1E-5)    
-    import pdb; pdb.set_trace();
     assert np.allclose(T_right.tocoo().tocsr().todense(), W_right_dense, atol=1E-5)    
-
-    return 
-
-    #assert np.allclose(T_right.tocoo().todense(), W_right_dense, atol=1E-5)    
-
-
 
     keynet.globals.verbose(False)
 
@@ -200,21 +190,11 @@ def test_sparse_tiled_matrix():
     T_right = keynet.sparse.Conv2dTiledMatrix(W_right, inshape=(2,U,V), outshape=(4,U//2,V//2), tileshape=(2, 4), bias=False)
     assert np.allclose(T_right.tocoo().todense(), W_right_dense, atol=1E-5)    
 
-
-
-
-
-    return 
-
-
-
     (U,V) = (32,32)
     W_right = sparse_toeplitz_conv2d( (2,U,V), np.random.rand(4,2,3,3), bias=np.random.rand(4), stride=2)
     W_right_dense = W_right.todense()        
     T_right = keynet.sparse.Conv2dTiledMatrix(W_right, inshape=(2,U,V), outshape=(4,U//2,V//2), tileshape=(2, 4), bias=True)
     assert np.allclose(T_right.tocoo().todense(), W_right_dense, atol=1E-5)    
-
-    import pdb;pdb.set_trace()
 
     print('[test_block_tiled]:  PASSED')
     

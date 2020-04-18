@@ -32,6 +32,7 @@ def mat2gray(x, dtype=np.float32):
     (A, Ainv) = diagonal_affine_to_linear(gain*scipy.sparse.eye(n), np.ones( (n,1) )*bias, withinverse=True, dtype=dtype)
     return (A, Ainv)
 
+
 def scipy_coo_to_torch_sparse(coo, device='cpu'):
     """https://stackoverflow.com/questions/50665141/converting-a-scipy-coo-matrix-to-pytorch-sparse-tensor"""
 
@@ -118,7 +119,7 @@ def diagonal_affine_to_linear(A, bias=None, withinverse=False, dtype=np.float32)
         return L.astype(dtype)
     
 
-@numba.jit(nopython=True, parallel=False, nogil=False)
+@numba.jit(nopython=True, parallel=False, nogil=True)
 def _sparse_toeplitz_conv2d(inshape, f, as_correlation, stride):
     (C,U,V) = inshape
     (M,C,P,Q) = f.shape
@@ -130,12 +131,12 @@ def _sparse_toeplitz_conv2d(inshape, f, as_correlation, stride):
     Q_range = Q_range if as_correlation else range(max(list(Q_range))-1, min(list(Q_range))-1, -1)
     (U_div_stride, V_div_stride) = (U//stride, V//stride)
     
-    rows = np.zeros(U*V*C*M*P*Q, dtype=np.int32)
-    cols = np.zeros(U*V*C*M*P*Q, dtype=np.int32)
-    vals = np.zeros(U*V*C*M*P*Q, dtype=np.float32)
-    k_entry = 0
-    
+    rows = np.zeros(U_div_stride*V_div_stride*C*M*P*Q, dtype=np.int32)
+    cols = np.zeros(U_div_stride*V_div_stride*C*M*P*Q, dtype=np.int32)
+    vals = np.zeros(U_div_stride*V_div_stride*C*M*P*Q, dtype=np.float32)
+
     # For every image_row
+    k_entry = 0
     for (ku,u) in enumerate(np.arange(0,U,stride)):
         # For every image_column
         for (kv,v) in enumerate(np.arange(0,V,stride)):
@@ -155,7 +156,7 @@ def _sparse_toeplitz_conv2d(inshape, f, as_correlation, stride):
                                 cols[k_entry] = int(c)
                                 vals[k_entry] = float(f[k_outchannel,k_inchannel,i,j])
                                 k_entry += 1  # impure loop
-
+        
     return (rows[0:k_entry], cols[0:k_entry], vals[0:k_entry])
 
 
@@ -534,21 +535,16 @@ class TiledMatrix(SparseMatrix):
         self.shape = (T.shape[0], T.shape[1])
         self.ndim = 2
 
-        sw = Stopwatch()
         T = T.tocoo()   # preserves sparsity
         (h,w) = tileshape
         (H,W) = self.shape        
-        print('[TiledMatrix] tocoo=%1.1f' % sw.since())
 
-        sw = Stopwatch()
         d_blockidx_to_tile = defaultdict(list)
         for (i,j,v) in zip(T.row, T.col, T.data):
             (ii,jj,vv) = (int(i), int(j), float(v))  # casting to native python types 
             (bi,bj) = (ii//h, jj//w)
             d_blockidx_to_tile[(bi, bj)].append( (ii-bi*h, jj-bj*w, vv) )                
-        print('[TiledMatrix] group=%1.1f' % sw.since())
 
-        sw = Stopwatch()
         d_blockhash_to_index = dict()
         self._tiles = []
         self._blocks = []
@@ -566,11 +562,8 @@ class TiledMatrix(SparseMatrix):
                 d_blockhash_to_index[blockhash] = len(self._tiles)-1
             self._blocks.append( (bi*h, bj*w, d_blockhash_to_index[blockhash]) )
 
-        print('[TiledMatrix] hash=%1.1f' % sw.since())
 
-        sw = Stopwatch()
         self._blocks = sorted(self._blocks, key=lambda x: (x[0], x[1]))  # rowmajor order
-        print('[TiledMatrix] sorted=%1.1f' % sw.since())
 
     def __repr__(self):
         return str('<keynet.TiledMatrix: H=%d, W=%d, tileshape=%s, tiles=%d>' % (*self.shape, str(self.tileshape()), len(self.tiles())))
@@ -609,12 +602,8 @@ class TiledMatrix(SparseMatrix):
         if not self.is_numpy_dense(x):
             x = x.detach().numpy()
 
-        with Stopwatch() as sw:
-            W = self.tocsr()   # slow for large matrices
-        print('[TiledMatrix.torchdot]: tocsr=%1.1f' % sw.since())
-        with Stopwatch() as sw:
-            y = W.dot(x).astype(np.float32)  # MKL multi-threaded with scipy-intel package
-        print('[TiledMatrix.torchdot]: dot=%1.1f' % sw.since())
+        W = self.tocsr()   # slow for large matrices
+        y = W.dot(x).astype(np.float32)  # MKL multi-threaded with scipy-intel package
         return torch.as_tensor(y) 
                         
     def transpose(self):
@@ -765,14 +754,10 @@ class Conv2dTiledMatrix(TiledMatrix):
             T_lastcol = T[:,-1]
             T = T[0:-1, 0:-1]  # FIXME: Yuck..
 
-        sw = Stopwatch()
         T = T.tocoo()  # expensive
         nb_tiles = self.__tiler__(T.row, T.col, T.data, nb_blocks, inshape, outshape, T.shape, tileshape)
-        print('[TiledMatrix.init]: tocoo+tile=%1.1f seconds' % sw.since())
-
         self._tiles = {(i,j,k):v for ((i,j,k),v) in nb_tiles.items()}  # numba to python
         
-        sw = Stopwatch()
         # Bias tile structure        
         if bias:
             B = TiledMatrix(T_lastcol, tileshape=(self._tileshape[0], 1))
@@ -781,12 +766,9 @@ class Conv2dTiledMatrix(TiledMatrix):
                 for (i,j,v) in zip(t.row, t.col, t.data):
                     self._tiles[(int(i), int(j), int(k_offset+kt))] = np.array(v).reshape(1,1).astype(np.float32)
             self._blocks += [(i, Cin*Hin*Win, k_offset+k) for (i,j,k) in B._blocks]  # repeated tiles, FIXME: repeated structure 
-        print('[TiledMatrix.init]: bias=%1.1f seconds' % sw.since())
 
         # Rowmajor order
-        sw = Stopwatch()
         self._blocks = sorted(self._blocks, key=lambda x: (x[0], x[1]))
-        print('[TiledMatrix.init]: sort=%1.1f seconds' % sw.since())        
 
     def nnz(self):
         return sum([v.size for ((i,j,k),v) in self._tiles.items()])
@@ -827,9 +809,8 @@ class Conv2dTiledMatrix(TiledMatrix):
         return (rows, cols, data)
     
     def tosparse(self, format='coo'):
-        # http://numba.pydata.org/numba-doc/latest/reference/deprecation.html#deprecation-of-reflection-for-list-and-set-types
         nb_blocks = numba.typed.List()
-        [nb_blocks.append(b) for b in self._blocks]
+        [nb_blocks.append(b) for b in self._blocks]  # no reflection
 
         nb_tiles = numba.typed.Dict()        
         for ((i,j,k),v) in self._tiles.items():
