@@ -23,6 +23,7 @@ from keynet.cifar10 import AllConvNet
 import keynet.system
 import keynet.dense
 import keynet.globals
+import keynet.vgg
 
 
 def example_2x2():
@@ -364,6 +365,66 @@ def print_parameters():
     for k in [2,4,8,16]:
         (sensor, knet) = keynet.system.TiledOrthogonalKeynet(inshape, net, k)
         print('[figures.print_parameters]:  TiledOrthogonalKeynet-%d (allconvnet) parameters=%d' % (k, knet.num_parameters()))        
+
+    inshape = (3,224,224)
+    net = keynet.vgg.VGG16()
+    print('[figures.print_parameters]:  vgg-16 parameters=%d' % (keynet.torch.count_parameters(net)))
+
+    (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)    
+    print('[figures.print_parameters]:  IdentityKeynet (vgg-16) parameters=%d' % (knet.num_parameters()))
+
+    (sensor, knet) = keynet.system.PermutationKeynet(inshape, net)    
+    print('[figures.print_parameters]:  PermutationKeynet (vgg-16) parameters=%d' % (knet.num_parameters()))
+
+    for k in [2,4,8,16,32]:
+        (sensor, knet) = keynet.system.TiledPermutationKeynet(inshape, net, k)
+        print('[figures.print_parameters]:  TiledPermutationKeynet-%d (vgg-16) parameters=%d' % (k, knet.num_parameters()))        
+
+    for k in [2,4,8,16,32]:
+        (sensor, knet) = keynet.system.TiledOrthogonalKeynet(inshape, net, k)
+        print('[figures.print_parameters]:  TiledOrthogonalKeynet-%d (vgg-16) parameters=%d' % (k, knet.num_parameters()))        
+
+
+#(keynet) jba3139@ma01-5200-0053:/proj/diva3/visym/keynet$ python figures.py
+#[figures.print_parameters]:  lenet parameters=106154
+#[figures.print_parameters]:  IdentityKeynet (lenet) parameters=323491
+#[figures.print_parameters]:  PermutationKeynet (lenet) parameters=323491
+#[figures.print_parameters]:  TiledPermutationKeynet-2 (lenet) parameters=111414
+#[figures.print_parameters]:  TiledPermutationKeynet-4 (lenet) parameters=112836
+#[figures.print_parameters]:  TiledPermutationKeynet-8 (lenet) parameters=180511
+#[figures.print_parameters]:  allconvnet parameters=1434848
+#[figures.print_parameters]:  IdentityKeynet (allconvnet) parameters=261589345
+#[figures.print_parameters]:  PermutationKeynet (allconvnet) parameters=261589345
+#[figures.print_parameters]:  TiledPermutationKeynet-2 (allconvnet) parameters=6130517
+#[figures.print_parameters]:  TiledPermutationKeynet-4 (allconvnet) parameters=27123817
+#[figures.print_parameters]:  TiledPermutationKeynet-8 (allconvnet) parameters=100124561
+#[figures.print_parameters]:  TiledPermutationKeynet-16 (allconvnet) parameters=231642641
+#/proj/diva3/visym/keynet/keynet/sparse.py:72: UserWarning: [keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blocksize=100 and shape=(100, 1, 1)
+#  warnings.warn('[keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blocksize=%d and shape=%s' % (blocksize, str(shape)))
+#/proj/diva3/visym/keynet/keynet/sparse.py:72: UserWarning: [keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blocksize=10 and shape=(10, 1, 1)
+#  warnings.warn('[keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blocksize=%d and shape=%s' % (blocksize, str(shape)))
+#[figures.print_parameters]:  TiledOrthogonalKeynet-2 (allconvnet) parameters=8265385
+#[figures.print_parameters]:  TiledOrthogonalKeynet-4 (allconvnet) parameters=34303201
+#[figures.print_parameters]:  TiledOrthogonalKeynet-8 (allconvnet) parameters=214061089
+#[figures.print_parameters]:  TiledOrthogonalKeynet-16 (allconvnet) parameters=299850625
+#[figures.print_parameters]:  vgg-16 parameters=145002878
+#[figures.print_parameters]:  IdentityKeynet (vgg-16) parameters=15003577501
+#[figures.print_parameters]:  PermutationKeynet (vgg-16) parameters=15003577501
+#[figures.print_parameters]:  TiledPermutationKeynet-2 (vgg-16) parameters=221650375
+#[figures.print_parameters]:  TiledPermutationKeynet-4 (vgg-16) parameters=391547595
+#[figures.print_parameters]:  TiledPermutationKeynet-8 (vgg-16) parameters=1309050019
+#[figures.print_parameters]:  TiledPermutationKeynet-16 (vgg-16) parameters=3355029838
+#[figures.print_parameters]:  TiledPermutationKeynet-32 (vgg-16) parameters=8020088700
+#/proj/diva3/visym/keynet/keynet/sparse.py:72: UserWarning: [keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blocksize=4096 and shape=(4096, 1, 1)
+#  warnings.warn('[keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blocksize=%d and shape=%s' % (blocksize, str(shape)))
+#/proj/diva3/visym/keynet/keynet/sparse.py:72: UserWarning: [keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blocksize=2622 and shape=(2622, 1, 1)
+#  warnings.warn('[keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blocksize=%d and shape=%s' % (blocksize, str(shape)))
+#[figures.print_parameters]:  TiledOrthogonalKeynet-2 (vgg-16) parameters=380254249
+#[figures.print_parameters]:  TiledOrthogonalKeynet-4 (vgg-16) parameters=2115837515
+#[figures.print_parameters]:  TiledOrthogonalKeynet-8 (vgg-16) parameters=2418676131
+#[figures.print_parameters]:  TiledOrthogonalKeynet-16 (vgg-16) parameters=6691972555
+#[figures.print_parameters]:  TiledOrthogonalKeynet-32 (vgg-16) parameters=11614996701
+
 
 if __name__ == '__main__':
     print_parameters()
