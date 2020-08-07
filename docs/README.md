@@ -20,13 +20,13 @@ These images contain a secret message. We will release these images along with t
 
 ## Citation
 
-```@InProceedings{Byrne2020bmvc,  
-  author       = "J. Byrne and B. Decann and S. Bloom",  
-  title        = "Key-Nets: Optical Transformation Convolutional Networks for Privacy Preserving Vision Sensors",  
-  booktitle    = "British Machine Vision Conference (BMVC)",  
-  year         = "2020"  
-}```
-
+> @InProceedings{Byrne2020bmvc,  
+>     author       = "J. Byrne and B. Decann and S. Bloom",  
+>     title        = "Key-Nets: Optical Transformation Convolutional Networks for Privacy Preserving Vision Sensors",  
+>     booktitle    = "British Machine Vision Conference (BMVC)",  
+>     year         = "2020"  
+> }  
+    
 
 ## Acknowledgement
 
