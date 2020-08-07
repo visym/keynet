@@ -1,10 +1,4 @@
-Key-Nets: Optical Transformation Convolutional Networks for Privacy Preserving Vision Sensors  
-Jeffrey Byrne, Brian Decann, Scott Bloom  
-British Machine Vision Conference, 2020  
-
-
 ![Keynet](keynet_overview.png)
-
 
 ## Abstract
 
@@ -19,6 +13,10 @@ Modern cameras are not designed with computer vision or machine learning as the 
 These images contain a secret message. We will release these images along with their paired keynet to challenge the research community to discover a weakness in semantic security of our proposed approach.
 
 ## Citation
+
+Key-Nets: Optical Transformation Convolutional Networks for Privacy Preserving Vision Sensors  
+Jeffrey Byrne, Brian Decann, Scott Bloom  
+British Machine Vision Conference, 2020  
 
 > @InProceedings{Byrne2020bmvc,  
 >     author       = "J. Byrne and B. Decann and S. Bloom",  
