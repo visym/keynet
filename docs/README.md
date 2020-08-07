@@ -15,7 +15,7 @@ These images contain a secret message. We will release these images along with t
 ## Citation
 
 **Key-Nets: Optical Transformation Convolutional Networks for Privacy Preserving Vision Sensors**  
-Jeffrey Byrne [(Visym Labs)](https://visym.com), Brian Decann [(STR)](https://stresearch.com), Scott Bloom [(STR)](https://stresearch.com)
+Jeffrey Byrne [(Visym Labs)](https://visym.com), Brian Decann [(STR)](https://stresearch.com), Scott Bloom [(STR)](https://stresearch.com)  
 British Machine Vision Conference (BMVC) 2020  
 
 > @InProceedings{Byrne2020bmvc,  
