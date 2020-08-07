@@ -4,8 +4,7 @@ British Machine Vision Conference, 2020
 
 [code](https://github.com/visym/keynet)    [arXiv](http://arxiv.org)    
 
-![Keynet1](docs/keynet_overview_two.pdf)
-![Keynet2](docs/keynet_convnet_comparison_v2.pdf)
+![Keynet](keynet_overview.png)
 
 
 ## Abstract
