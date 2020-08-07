@@ -2,8 +2,8 @@ Key-Nets: Optical Transformation Convolutional Networks for Privacy Preserving V
 Jeffrey Byrne, Brian Decann, Scott Bloom  
 [code](https://github.com/visym/keynet) [arXiv](http://arxiv.org)    
 
-![Keynet1](keynet_overview_two.pdf)
-![Keynet2](keynet_convnet_comparison_v2.pdf)
+![Keynet1](docs/keynet_overview_two.pdf)
+![Keynet2](docs/keynet_convnet_comparison_v2.pdf)
 
 
 ## Abstract
