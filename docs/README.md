@@ -14,9 +14,9 @@ These images contain a secret message. We will release these images along with t
 
 ## Citation
 
-**Key-Nets: Optical Transformation Convolutional Networks for Privacy Preserving Vision Sensors**
+**Key-Nets: Optical Transformation Convolutional Networks for Privacy Preserving Vision Sensors**  
 Jeffrey Byrne, Brian Decann, Scott Bloom  
-British Machine Vision Conference (BMVC) 2020 
+British Machine Vision Conference (BMVC) 2020  
 
 > @InProceedings{Byrne2020bmvc,  
 >     author       = "J. Byrne and B. Decann and S. Bloom",  
