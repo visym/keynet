@@ -17,49 +17,49 @@ def show_corner_block_permutation():
     vipy.image.Image(array=img_permuted).show()
     
     
-def show_image_block_permutation(imgfile='./demo/owl.jpg'):
+def show_image_block_permutation(imgfile='../demo/owl.jpg'):
     im = vipy.image.Image(imgfile).resize(512, 512, interp='nearest')
     img_permuted = block_permute(im.array(), (128,128))
     im.close().show()
     vipy.image.Image(array=img_permuted).show()
 
 
-def show_global_hierarchical_block_permutation(imgfile='./demo/owl.jpg'):
+def show_global_hierarchical_block_permutation(imgfile='../demo/owl.jpg'):
     im = vipy.image.Image(imgfile).resize(512, 512, interp='nearest')
     img_permuted = hierarchical_block_permute(im.array(), blockshape=(2,2), permute_at_level=[0])
     im.close().show()
     vipy.image.Image(array=img_permuted).show()
 
     
-def show_local_hierarchical_block_permutation(imgfile='./demo/owl.jpg'):
+def show_local_hierarchical_block_permutation(imgfile='../demo/owl.jpg'):
     im = vipy.image.Image(imgfile).resize(512, 512, interp='nearest')
     img_permuted = hierarchical_block_permute(im.array(), blockshape=(2,2), permute_at_level=[4,5])
     im.close().show()
     vipy.image.Image(array=img_permuted).show()
 
     
-def show_global_hierarchical_block_permutation_2x2(imgfile='./demo/owl.jpg'):
+def show_global_hierarchical_block_permutation_2x2(imgfile='../demo/owl.jpg'):
     im = vipy.image.Image(imgfile).resize(512, 512, interp='nearest')
     img_permuted = hierarchical_block_permute(im.array(), blockshape=(2,2), permute_at_level=[0,1,2,3,4,5])
     im.close().show()
     vipy.image.Image(array=img_permuted).show()
     
     
-def show_global_hierarchical_block_permutation_3x3(imgfile='./demo/owl.jpg'):
+def show_global_hierarchical_block_permutation_3x3(imgfile='../demo/owl.jpg'):
     im = vipy.image.Image(imgfile).resize(486, 486, interp='nearest')
     img_permuted = hierarchical_block_permute(im.array(), blockshape=(3,3), permute_at_level=[0,1,2,3])
     im.close().show()
     vipy.image.Image(array=img_permuted).show()
 
 
-def show_global_hierarchical_block_permutation_grey_2x3(imgfile='./demo/owl.jpg'):
+def show_global_hierarchical_block_permutation_grey_2x3(imgfile='../demo/owl.jpg'):
     im = vipy.image.Image(imgfile).resize(rows=512, cols=486, interp='nearest').greyscale()
     img_permuted = hierarchical_block_permute(im.array(), blockshape=(2,3), permute_at_level=[0,1,2,3])
     im.close().show()
     vipy.image.Image(array=img_permuted, colorspace='float').show()
     
 
-def test_hierarchical_block_permutation(imgfile='./demo/owl.jpg', show=False, seed=42):
+def test_hierarchical_block_permutation(imgfile='../demo/owl.jpg', show=False, seed=42):
     im = vipy.image.Image(imgfile).resize(256, 256, interp='nearest')
     img_permuted = hierarchical_block_permute(im.array(), blockshape=(2,2), permute_at_level=[0,1], seed=seed)
     P = hierarchical_block_permutation_matrix(im.array().shape, blockshape=(2,2), permute_at_level=[0,1], seed=seed)

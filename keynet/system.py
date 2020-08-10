@@ -168,7 +168,7 @@ class KeyedSensor(keynet.layer.KeyedLayer):
         self._layertype = 'input'
         
     def __repr__(self):
-        return str('<KeySensor: height=%d, width=%d, channels=%d>' % (self._inshape[2], self._inshape[3], self._inshape[1]))
+        return str('<KeyedSensor: height=%d, width=%d, channels=%d>' % (self._inshape[2], self._inshape[3], self._inshape[1]))
 
     def save(self, outfile='/tmp/out.png'):
         assert self.isencrypted()
@@ -211,8 +211,12 @@ class KeyedSensor(keynet.layer.KeyedLayer):
             self._tensor = x.clone().type(torch.FloatTensor)
         return self
 
+    def tensor(self):
+        return self._tensor
+    
     def astensor(self):
         return self._tensor
+    
     def totensor(self):
         return self.astensor()
     
@@ -222,6 +226,7 @@ class KeyedSensor(keynet.layer.KeyedLayer):
             x_torch = keynet.torch.linear_to_affine(x_torch, self._inshape)
         im = self._im.fromtorch(x_torch).mat2gray()  # 1xCxHxW -> HxWxC
         return im.rgb() if im.iscolor() else im.lum()  # uint8
+    
     def toimage(self):
         return self.asimage()
 
@@ -241,7 +246,7 @@ class KeyedSensor(keynet.layer.KeyedLayer):
 
     def isloaded(self):
         return self._tensor is not None
-    
+
     def encrypt(self):
         """img_tensor is NxCxHxW, return Nx(C*H*W+1) homogenized and encrypted"""
         assert self.isloaded(), "Load image first"
@@ -257,6 +262,27 @@ class KeyedSensor(keynet.layer.KeyedLayer):
             self._tensor = keynet.torch.linear_to_affine(x_raw, self._inshape)
         return self
 
+    
+class PublicKeyedSensor(KeyedSensor):
+    def __init__(self, inshape):
+        assert isinstance(inshape, tuple) and len(inshape) == 3
+        super(PublicKeyedSensor, self).__init__(inshape, (sparse_identity_matrix(np.prod(inshape)+1), sparse_identity_matrix(np.prod(inshape)+1)))
+
+    def __repr__(self):
+        return str('<PublicKeyedSensor: height=%d, width=%d, channels=%d>' % (self._inshape[2], self._inshape[3], self._inshape[1]))        
+        
+    def encrypt(self):
+        raise ValueError('PublicKeyedSensor has no encryption keys')
+
+    def decrypt(self):
+        raise ValueError('PublicKeyedSensor has no decryption keys')
+
+    def tensor(self):
+        assert self.isloaded(), "Load image first"
+        if not self.isencrypted():
+            self._tensor = self.forward(keynet.torch.affine_to_linear(self._tensor))
+        return self._tensor
+        
     
 class OpticalFiberBundle(KeyedSensor):
     def __init__(self, inshape=(3,512,512), keypair=None):

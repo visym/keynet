@@ -522,10 +522,17 @@ class TiledMatrix(SparseMatrix):
         """Given a sparse matrix T, split into non-overlapping nxn blocks or 'tiles' of size self._tileshape x self.Blocksize, and 
            return an indexed representation for unique submatrices which provides memory efficient matrix vector multiplication when T is self-similar.
         
+        Input:
+            -T: scipy sparse matrix of size NxM
+            -tileshape:  tuple of (height, width) for the size of each tile
+
         Representation
-            B = [(i,j,k),...] for block index (i,j) with submatrix key k
-            M = {k:np.array(), ...} a submatrix dictionary, such that the submatrix for block (i,j)=(B[u][0], B[u][1]) is M[B[u][2]]
+            -self._blocks = [(i,j,k),...] for block index (i,j) with submatrix key k
+            -self._tiles = {k:np.array(), ...} a submatrix dictionary, such that the submatrix for block (i,j,k)=self._tiles[k]
         
+        Notes:
+            -This representation is very inefficient if T is not block compressible.  No checks or warnings will be provided.
+
         """
         assert self.is_scipy_sparse(T), "input must be scipy.sparse.coo_matrix()"
         assert isinstance(tileshape, tuple) and len(tileshape)==2 and tileshape[0] > 0 and tileshape[1] > 0, "tileshape must be tuple (tileheight, tilewidth) > 0"

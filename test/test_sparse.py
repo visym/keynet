@@ -99,7 +99,7 @@ def test_blockview():
 
 
 def show_sparse_blockkey(n=32):
-    im = vipy.image.Image('./demo/owl.jpg').resize(256,256).grey()
+    im = vipy.image.Image('../demo/owl.jpg').resize(256,256).grey()
     img = im.numpy()
     x = img.flatten()
     # b = scipy.sparse.coo_matrix(keynet.util.random_dense_permutation_matrix(n).astype(np.float32))
@@ -151,7 +151,7 @@ def test_sparse_tiled_matrix():
     assert np.allclose(W.todense().astype(np.float32), T.tocoo().todense(), atol=1E-5)
    
     (U,V) = (17,32)
-    im = vipy.image.Image('./demo/owl.jpg').resize(U,V).grey()
+    im = vipy.image.Image('../demo/owl.jpg').resize(U,V).grey()
     img = im.tonumpy()
     x = torch.tensor(img.reshape(1,U,V))
 
@@ -200,7 +200,7 @@ def test_sparse_tiled_matrix():
     
 
 def show_channelorder_to_blockorder():
-    im = vipy.image.Image('./demo/owl.jpg').greyscale().resize(32, 32, interp='nearest')
+    im = vipy.image.Image('../demo/owl.jpg').greyscale().resize(32, 32, interp='nearest')
     img = im.array()
     img = np.expand_dims(img, 0)  # HxWxC -> 1xCxHxW
     img = np.expand_dims(img, 0)  # HxWxC -> 1xCxHxW    
@@ -329,6 +329,51 @@ def test_sparse_matrix():
     print('[test_sparse_matrix]: PASSED')
 
 
+
+    
+def test_numba_tiled_matrix():
+    T = keynet.sparse.DiagonalTiledMatrix(np.random.rand(3,3).astype(np.float32), shape=(10,10))
+    T = keynet.sparse.TiledMatrix(T.tosparse(), (3,3))
+
+    import numba
+    from numba import cuda
+    
+    @cuda.jit
+    def matmul(A, B, C):
+        """Perform square matrix multiplication of C = A * B
+        """
+        i, j = cuda.grid(2)
+        if i < C.shape[0] and j < C.shape[1]:
+            tmp = 0.
+            for k in range(A.shape[1]):
+                tmp += A[i, k] * B[k, j]
+            C[i, j] = tmp
+
+    A = np.full((24, 12), 3, np.float) # matrix containing all 3's
+    B = np.full((12, 22), 4, np.float) # matrix containing all 4's
+
+    # Copy the arrays to the device
+    A_global_mem = cuda.to_device(A)
+    B_global_mem = cuda.to_device(B)
+    
+    # Allocate memory on the device for the result
+    C_global_mem = cuda.device_array((24, 22))
+    
+    # Configure the blocks
+    threadsperblock = (16, 16)
+    blockspergrid_x = int(np.ceil(A.shape[0] / threadsperblock[0]))
+    blockspergrid_y = int(np.ceil(B.shape[1] / threadsperblock[1]))
+    blockspergrid = (blockspergrid_x, blockspergrid_y)
+
+    # Start the kernel 
+    matmul[blockspergrid, threadsperblock](A_global_mem, B_global_mem, C_global_mem)
+
+    # Copy the result back to the host
+    C = C_global_mem.copy_to_host()
+
+    print(C)
+
+    
 if __name__ == '__main__':
     test_diagonal_affine_to_linear()
     test_torch_homogenize()
