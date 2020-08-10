@@ -13,14 +13,13 @@ pip3 install -e .
 
 # Quickstart
 ```python
+from keynet.mnist import LeNet_AvgPool
+from keynet.system immport PermutationKeynet
+
 net = LeNet_AvgPool()
 (sensor, knet) = PermutationKeynet(inshape=(1,28,28), net=net, do_output_encryption=False)
-y = knet.forward(sensor.load('myimage.jpg').encrypt().tensor())
+y = knet.forward(sensor.load('./demo/owl.jpg').encrypt().tensor())
 ```
 
-```python
-python test_sparse.py  
-python test_keynet.py  
-```
 
 
