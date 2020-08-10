@@ -14,7 +14,7 @@ pip3 install -e .
 # Quickstart
 ```python
 from keynet.mnist import LeNet_AvgPool
-from keynet.system immport PermutationKeynet
+from keynet.system import PermutationKeynet
 
 net = LeNet_AvgPool()
 (sensor, knet) = PermutationKeynet(inshape=(1,28,28), net=net, do_output_encryption=False)
