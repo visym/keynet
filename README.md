@@ -2,9 +2,7 @@
 Key-Nets: Optical Transformation Convolutional Networks for Privacy Preserving Vision Sensors
 
 # Dependencies
-python-3.*
-
-Required 
+python 3
 
 ```python
 pip3 install intel-scipy intel-numpy torch torchvision vipy scikit-learn xxhash numba
