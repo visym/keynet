@@ -1,7 +1,7 @@
-# keynet
+# Keynet
 Key-Nets: Optical Transformation Convolutional Networks for Privacy Preserving Vision Sensors
 
-# Dependencies
+# Installation
 python 3
 
 ```python
@@ -14,7 +14,7 @@ pip3 install -e .
 # Virtualenv installation (Linux, multi-threaded scipy/numpy)
 pip3 install intel-scipy intel-numpy torch torchvision vipy scikit-learn xxhash numba tqdm
 pip3 install -e .  
-
+```
 
 # Quickstart
 ```python
