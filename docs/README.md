@@ -10,7 +10,7 @@ Modern cameras are not designed with computer vision or machine learning as the 
 
 ![Keynet](keynet_challenge.png)
 
-These images contain a secret message.  We have released the first of these images with the paired keynet to challenge the research community to discover a weakness in semantic security of our proposed approach.  [Good luck!](https://github.com/visym/keynet/blob/master/demo/challenge.ipynb).
+These images contain a secret message.  [We have released](https://github.com/visym/keynet/blob/master/demo/challenge.ipynb) the first of these images with the paired keynet to challenge the research community to discover a weakness in semantic security of our proposed approach.  Good luck!
 
 ## Citation
 
