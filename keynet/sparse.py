@@ -487,10 +487,8 @@ class SparseMatrix(object):
         
     def torchdot(self, x_torch):
         if not self.is_torch_dense_float32(x_torch):
-            warnings.warn('coercing to float32')
+            #warnings.warn('coercing to float32')  # FIXME
             x_torch = x_torch.type(torch.FloatTensor)  # FIXME
-        #if self.is_scipy_sparse(self._matrix):
-        #    self._matrix = self._matrix.tocsr()
         return torch.as_tensor(scipy.sparse.coo_matrix.dot(self._matrix, np.matrix(x_torch.detach().numpy())))
 
     def nnz(self):
