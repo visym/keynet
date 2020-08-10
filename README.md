@@ -6,9 +6,15 @@ python 3
 
 ```python
 # Virtualenv installation
-pip3 install intel-scipy intel-numpy torch torchvision vipy scikit-learn xxhash numba tqdm
+pip3 install scipy numpy torch torchvision vipy scikit-learn xxhash numba tqdm
 pip3 install -e .  
 ```
+
+```python
+# Virtualenv installation (Linux, multi-threaded scipy/numpy)
+pip3 install intel-scipy intel-numpy torch torchvision vipy scikit-learn xxhash numba tqdm
+pip3 install -e .  
+
 
 # Quickstart
 ```python
