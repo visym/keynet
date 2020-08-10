@@ -5,8 +5,9 @@ Key-Nets: Optical Transformation Convolutional Networks for Privacy Preserving V
 python 3
 
 ```python
-pip3 install intel-scipy intel-numpy torch torchvision vipy scikit-learn xxhash numba
-pip3 install -e .
+# Virtualenv installation
+pip3 install intel-scipy intel-numpy torch torchvision vipy scikit-learn xxhash numba tqdm
+pip3 install -e .  
 ```
 
 # Quickstart
