@@ -118,107 +118,15 @@ def optical_transformation_montage(imgfile=None):
     return img_montage
 
     
-def sparse_multiply_timing_analysis():
-    """Reproduce results for figure 7"""
-
-    #(n_outchannel, n_inchannel, width, height, kernelsize) = (32,32,128,128,3)
-    (n_outchannel, n_inchannel, width, height, kernelsize) = (6,4,8,8,3)  # Quicktest parameters
-
-    f = nn.Conv2d(n_inchannel, n_outchannel, kernelsize, padding=1)     
-    f_numpy = lambda x: torch_conv2d_in_scipy(x, f=f.weight.data.detach().numpy(), b=f.bias.data.detach().numpy(), stride=1)
-
-    W = sparse_toeplitz_conv2d( (n_inchannel,width,height), f.weight.data.detach().numpy(), bias=f.bias.data.detach().numpy())
-    W_torch = keynet.torch.scipy_coo_to_torch_sparse(W)
-    W = W.tocsr()
-    (A,Ainv) = sparse_generalized_permutation_block_matrix_with_inverse(n_inchannel*width*height+1, 1) 
-    (B,Binv) = sparse_generalized_permutation_block_matrix_with_inverse(n_outchannel*width*height+1, 1) 
-    W_keynet = B*W*Ainv  
-    W_keynet_torch = keynet.torch.scipy_coo_to_torch_sparse(W_keynet.tocoo())
-
-    X_numpy = [np.random.rand( 1,n_inchannel,width,height ).astype(np.float32) for j in range(0,10)]
-    X_torch = [torch.tensor(x) for x in X_numpy]
-    X_torch_keynet = [homogenize(x).t() for x in X_torch]
-    X_numpy_keynet = [np.array(x) for x in X_torch_keynet]
-
-    # Sanity check
-    assert(np.allclose(f(X_torch[0]).detach().numpy(), f_numpy(X_numpy[0]), atol=1E-4))
-    assert(np.allclose(f_numpy(X_numpy[0]).flatten(), dehomogenize(torch.tensor(W.dot(X_numpy_keynet[0])).t()).t().flatten(), atol=1E-4))
-
-    # Timing
-    with Stopwatch() as sw:
-        y = [f(x) for x in X_torch]
-    print('pytorch conv2d (cpu): %f ms' % (1000*sw.elapsed/len(X_torch)))
-
-    with Stopwatch() as sw:
-        y = [torch.sparse.mm(W_torch, x) for x in X_torch_keynet]
-    print('pytorch sparse conv2d (cpu): %f ms' % (1000*sw.elapsed/len(X_torch_keynet)))
-
-    with Stopwatch() as sw:
-        y = [torch.sparse.mm(W_keynet_torch, x) for x in X_torch_keynet]
-    print('pytorch sparse conv2d permuted (cpu): %f ms' % (1000*sw.elapsed/len(X_torch_keynet)))
-
-    with Stopwatch() as sw:
-        y = [f_numpy(x) for x in X_numpy]
-    print('numpy conv2d (cpu): %f ms' % (1000*sw.elapsed/len(X_numpy)))
-
-    with Stopwatch() as sw:
-        y = [W.dot(x) for x in X_numpy_keynet]
-    print('numpy sparse conv2d (cpu): %f ms' % (1000*sw.elapsed/len(X_numpy_keynet)))
-
-    with Stopwatch() as sw:
-        y = [torch.as_tensor(W.dot(x.numpy())) for x in X_torch_keynet]
-    print('numpy sparse conv2d with torch conversion (cpu): %f ms' % (1000*sw.elapsed/len(X_torch_keynet)))
-
-    with Stopwatch() as sw:
-        y = [W_keynet.dot(x) for x in X_numpy_keynet]
-    print('numpy sparse conv2d permuted (cpu): %f ms' % (1000*sw.elapsed/len(X_numpy_keynet)))
-
-    with Stopwatch() as sw:
-        y = [torch.as_tensor(W_keynet.dot(x.numpy())) for x in X_torch_keynet]
-    print('numpy sparse conv2d permuted with torch conversion (cpu): %f ms' % (1000*sw.elapsed/len(X_torch_keynet)))
-
-    f_gpu = f.cuda(0)
-    X_torch_gpu = [x.cuda(0) for x in X_torch]    
-    with Stopwatch() as sw:
-        for j in range(0,len(X_torch)):
-            y = f_gpu(X_torch_gpu[j])
-    print('pytorch conv2d (gpu): %f ms' % (1000*sw.elapsed/len(X_torch_gpu)))
-
-    W_torch_gpu = W_torch.cuda(1)
-    X_torch_keynet_gpu = [x.cuda(1) for x in X_torch_keynet]    
-    with Stopwatch() as sw:
-        for j in range(0,len(X_torch)):
-            y = torch.sparse.mm(W_torch_gpu, X_torch_keynet_gpu[j])
-    print('pytorch sparse conv2d (gpu): %f ms' % (1000*sw.elapsed/len(X_torch_keynet_gpu)))
-
-    W_keynet_torch_gpu = W_keynet_torch.cuda(2)
-    X_torch_keynet_gpu = [x.cuda(2) for x in X_torch_keynet]    
-    with Stopwatch() as sw:
-        for j in range(0,len(X_torch)):
-            y = torch.sparse.mm(W_keynet_torch_gpu, X_torch_keynet_gpu[j])
-    print('pytorch sparse conv2d permuted (gpu): %f ms' % (1000*sw.elapsed/len(X_torch_keynet_gpu)))
-
-    import cupy
-    import cupyx
-    with cupy.cuda.Device(3):
-        W_keynet_cupy = cupyx.scipy.sparse.csr_matrix(W_keynet.tocsr())
-        X_cupy_keynet_gpu = [cupy.array(x) for x in X_numpy_keynet]    
-        with Stopwatch() as sw:
-            for j in range(0,len(X_cupy_keynet_gpu)):
-                y = W_keynet_cupy.dot(X_cupy_keynet_gpu[j])
-        print('cupy sparse conv2d permuted (gpu): %f ms' % (1000*sw.elapsed/len(X_cupy_keynet_gpu)))
-
-
-    
 def train_mnist_lenet():
     """Reproduce results in figure 6, 'raw' column"""
-    net = keynet.mnist.train(LeNet(), modelfile='./models/mnist_lenet.pth', lr=0.003, epochs=20)
+    net = keynet.mnist.train(LeNet(), modelfile='../models/mnist_lenet.pth', lr=0.003, epochs=20)
     keynet.mnist.validate(net)
 
 
 def train_mnist_lenet_avgpool():
     """Reproduce results in figure 6, 'raw' column"""
-    net = keynet.mnist.train(LeNet_AvgPool(), modelfile='./models/mnist_lenet_avgpool.pth', lr=0.003, epochs=40)
+    net = keynet.mnist.train(LeNet_AvgPool(), modelfile='../models/mnist_lenet_avgpool.pth', lr=0.003, epochs=40)
     keynet.mnist.validate(net)
 
     
@@ -260,22 +168,22 @@ def train_mnist_lenet_avgpool_fiberbundle(do_mean_estimation=True, mnistdir=temp
 
     # Validate (lenet)
     net1 = keynet.mnist.LeNet_AvgPool()
-    net1.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'))
+    net1.load_state_dict(torch.load('../models/mnist_lenet_avgpool.pth'))
     keynet.cifar10.validate(net1, testloader=testpreload)
 
     # Re-train and Re-validate (lenet)
     net2 = keynet.mnist.LeNet_AvgPool()
-    keynet.cifar10.train(net2, modelfile='./models/mnist_lenet_avgpool_fiberbundle.pth', lr=0.004, epochs=40, trainloader=trainpreload)
+    keynet.cifar10.train(net2, modelfile='../models/mnist_lenet_avgpool_fiberbundle.pth', lr=0.004, epochs=40, trainloader=trainpreload)
     net3 = keynet.mnist.LeNet_AvgPool()
-    net3.load_state_dict(torch.load('./models/mnist_lenet_avgpool_fiberbundle.pth'))
+    net3.load_state_dict(torch.load('../models/mnist_lenet_avgpool_fiberbundle.pth'))
     keynet.cifar10.validate(net3, testloader=testpreload)
 
 
 def train_cifar10_allconv():
     """Reproduce results in figure 6"""
-    keynet.cifar10.train(keynet.cifar10.AllConvNet(), modelfile='./models/cifar10_allconv.pth', lr=0.01, epochs=350)
+    keynet.cifar10.train(keynet.cifar10.AllConvNet(), modelfile='../models/cifar10_allconv.pth', lr=0.01, epochs=350)
     testmodel = keynet.cifar10.AllConvNet()
-    testmodel.load_state_dict(torch.load('./models/cifar10_allconv.pth'))
+    testmodel.load_state_dict(torch.load('../models/cifar10_allconv.pth'))
     keynet.cifar10.validate(testmodel)
 
     
@@ -314,14 +222,14 @@ def train_cifar10_allconv_fiberbundle(do_mean_estimation=True, cifardir='/proj/e
 
     # Validate (allconv)
     net1 = keynet.cifar10.AllConvNet(3)
-    net1.load_state_dict(torch.load('./models/cifar10_allconv.pth'))
+    net1.load_state_dict(torch.load('../models/cifar10_allconv.pth'))
     keynet.cifar10.validate(net1, testloader=testpreload)
 
     # Re-train and Re-validate (lenet)
     net2 = keynet.cifar10.AllConvNet(3)
-    keynet.cifar10.train(net2, modelfile='./models/cifar10_allconv_fiberbundle.pth', lr=0.01, epochs=350, trainloader=trainpreload)
+    keynet.cifar10.train(net2, modelfile='../models/cifar10_allconv_fiberbundle.pth', lr=0.01, epochs=350, trainloader=trainpreload)
     net3 = AllConvNet(3)
-    net3.load_state_dict(torch.load('./models/cifar10_allconv_fiberbundle.pth'))
+    net3.load_state_dict(torch.load('../models/cifar10_allconv_fiberbundle.pth'))
     keynet.cifar10.validate(net3, testloader=testpreload)
 
 
@@ -330,7 +238,7 @@ def print_parameters():
 
     inshape = (1,28,28)
     net = keynet.mnist.LeNet_AvgPool()
-    net.load_state_dict(torch.load('./models/mnist_lenet_avgpool.pth'));
+    net.load_state_dict(torch.load('../models/mnist_lenet_avgpool.pth'));
     print('[figures.print_parameters]:  lenet parameters=%d' % (keynet.torch.count_parameters(net)))
     
     (sensor, knet) = keynet.system.IdentityKeynet(inshape, net)
@@ -383,47 +291,6 @@ def print_parameters():
     for k in [2,4,8,16,32]:
         (sensor, knet) = keynet.system.TiledOrthogonalKeynet(inshape, net, k)
         print('[figures.print_parameters]:  TiledOrthogonalKeynet-%d (vgg-16) parameters=%d' % (k, knet.num_parameters()))        
-
-
-#(keynet) jba3139@ma01-5200-0053:/proj/diva3/visym/keynet$ python figures.py
-#[figures.print_parameters]:  lenet parameters=106154
-#[figures.print_parameters]:  IdentityKeynet (lenet) parameters=323491
-#[figures.print_parameters]:  PermutationKeynet (lenet) parameters=323491
-#[figures.print_parameters]:  TiledPermutationKeynet-2 (lenet) parameters=111414
-#[figures.print_parameters]:  TiledPermutationKeynet-4 (lenet) parameters=112836
-#[figures.print_parameters]:  TiledPermutationKeynet-8 (lenet) parameters=180511
-#[figures.print_parameters]:  allconvnet parameters=1434848
-#[figures.print_parameters]:  IdentityKeynet (allconvnet) parameters=261589345
-#[figures.print_parameters]:  PermutationKeynet (allconvnet) parameters=261589345
-#[figures.print_parameters]:  TiledPermutationKeynet-2 (allconvnet) parameters=6130517
-#[figures.print_parameters]:  TiledPermutationKeynet-4 (allconvnet) parameters=27123817
-#[figures.print_parameters]:  TiledPermutationKeynet-8 (allconvnet) parameters=100124561
-#[figures.print_parameters]:  TiledPermutationKeynet-16 (allconvnet) parameters=231642641
-#/proj/diva3/visym/keynet/keynet/sparse.py:72: UserWarning: [keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blocksize=100 and shape=(100, 1, 1)
-#  warnings.warn('[keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blocksize=%d and shape=%s' % (blocksize, str(shape)))
-#/proj/diva3/visym/keynet/keynet/sparse.py:72: UserWarning: [keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blocksize=10 and shape=(10, 1, 1)
-#  warnings.warn('[keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blocksize=%d and shape=%s' % (blocksize, str(shape)))
-#[figures.print_parameters]:  TiledOrthogonalKeynet-2 (allconvnet) parameters=8265385
-#[figures.print_parameters]:  TiledOrthogonalKeynet-4 (allconvnet) parameters=34303201
-#[figures.print_parameters]:  TiledOrthogonalKeynet-8 (allconvnet) parameters=214061089
-#[figures.print_parameters]:  TiledOrthogonalKeynet-16 (allconvnet) parameters=299850625
-#[figures.print_parameters]:  vgg-16 parameters=145002878
-#[figures.print_parameters]:  IdentityKeynet (vgg-16) parameters=15003577501
-#[figures.print_parameters]:  PermutationKeynet (vgg-16) parameters=15003577501
-#[figures.print_parameters]:  TiledPermutationKeynet-2 (vgg-16) parameters=221650375
-#[figures.print_parameters]:  TiledPermutationKeynet-4 (vgg-16) parameters=391547595
-#[figures.print_parameters]:  TiledPermutationKeynet-8 (vgg-16) parameters=1309050019
-#[figures.print_parameters]:  TiledPermutationKeynet-16 (vgg-16) parameters=3355029838
-#[figures.print_parameters]:  TiledPermutationKeynet-32 (vgg-16) parameters=8020088700
-#/proj/diva3/visym/keynet/keynet/sparse.py:72: UserWarning: [keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blocksize=4096 and shape=(4096, 1, 1)
-#  warnings.warn('[keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blocksize=%d and shape=%s' % (blocksize, str(shape)))
-#/proj/diva3/visym/keynet/keynet/sparse.py:72: UserWarning: [keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blocksize=2622 and shape=(2622, 1, 1)
-#  warnings.warn('[keynet.sparse.sparse_channelorder_to_blockorder]:  Ragged blockorder for blocksize=%d and shape=%s' % (blocksize, str(shape)))
-#[figures.print_parameters]:  TiledOrthogonalKeynet-2 (vgg-16) parameters=380254249
-#[figures.print_parameters]:  TiledOrthogonalKeynet-4 (vgg-16) parameters=2115837515
-#[figures.print_parameters]:  TiledOrthogonalKeynet-8 (vgg-16) parameters=2418676131
-#[figures.print_parameters]:  TiledOrthogonalKeynet-16 (vgg-16) parameters=6691972555
-#[figures.print_parameters]:  TiledOrthogonalKeynet-32 (vgg-16) parameters=11614996701
 
 
 if __name__ == '__main__':
