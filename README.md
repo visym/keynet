@@ -3,7 +3,7 @@ Key-Nets: Optical Transformation Convolutional Networks for Privacy Preserving V
 
 ![Keynet](./docs/keynet_overview.png)
 
-[[project]](https://visym.github.io/keynet)  [[paper]](http://arxiv.org) 
+[[project]](https://visym.github.io/keynet)  [[paper]](https://arxiv.org/abs/2008.04469) 
 
 
 # Installation
