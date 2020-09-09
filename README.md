@@ -35,7 +35,7 @@ y = knet.forward(sensor.load('./demo/owl.jpg').encrypt().tensor())
 
 **Key-Nets: Optical Transformation Convolutional Networks for Privacy Preserving Vision Sensors**  
 Jeffrey Byrne [(Visym Labs)](https://visym.com), Brian Decann [(STR)](https://stresearch.com), Scott Bloom [(STR)](https://stresearch.com)  
-British Machine Vision Conference (BMVC) 2020  
+British Machine Vision Conference (BMVC) 2020, Best Paper - Runner up 
 
 > @InProceedings{Byrne2020bmvc,  
 > author = {J. Byrne and B. Decann and S. Bloom},  
