@@ -24,7 +24,7 @@ class KeyedLayer(nn.Module):
         if isinstance(module, nn.Conv2d):
             assert len(module.kernel_size)==1 or len(module.kernel_size)==2 and (module.kernel_size[0] == module.kernel_size[1]), "Kernel must be square"
             assert len(module.stride)==1 or len(module.stride)==2 and (module.stride[0] == module.stride[1]), "Strides must be isotropic"
-            assert len(inshape) == 3, "Inshape must be (C,H,W) for the shape of the tensor at the input to this layer"""
+            assert len(inshape) == 3, "Inshape must be (C,H,W) for the shape of the tensor at the input to this layer"
             assert module.padding[0] == module.kernel_size[0]//2 and module.padding[1] == module.kernel_size[1]//2, "Padding is assumed to be equal to (kernelsize-1)/2"            
             stride = module.stride[0] if len(module.stride)==2 else module.stride
             self._repr = 'Conv2d: in_channels=%d, out_channels=%d, kernel_size=%s, stride=%s' % (module.in_channels, module.out_channels, str(module.kernel_size), str(stride))      
@@ -48,7 +48,7 @@ class KeyedLayer(nn.Module):
         elif isinstance(module, nn.AvgPool2d):
             assert isinstance(module.kernel_size, int) or len(module.kernel_size)==2 and (module.kernel_size[0] == module.kernel_size[1]), "Kernel must be square"
             assert isinstance(module.stride, int) or len(module.stride)==2 and (module.stride[0] == module.stride[1]), "Strides must be isotropic"
-            assert len(inshape) == 3, "Inshape must be (C,H,W) for the shape of the tensor at the input to this layer"""            
+            assert len(inshape) == 3, "Inshape must be (C,H,W) for the shape of the tensor at the input to this layer"
             stride = module.stride if isinstance(module.stride, int) else module.stride[0]
             kernel_size = module.kernel_size if isinstance(module.kernel_size, int) else module.kernel_size[0]
             self._repr = 'AvgPool2d: kernel_size=%s, stride=%s' % (str(kernel_size), str(stride))

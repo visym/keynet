@@ -212,16 +212,16 @@ class KeyedSensor(keynet.layer.KeyedLayer):
         return self
 
     def tensor(self):
-        return self._tensor
+        return self._tensor.unsqueeze(0) if self._tensor.ndim == 3 else self._tensor
     
     def astensor(self):
-        return self._tensor
+        return self.tensor()
     
     def totensor(self):
         return self.astensor()
     
     def asimage(self):
-        x_torch = self._tensor        
+        x_torch = self._tensor
         if self.isencrypted():
             x_torch = keynet.torch.linear_to_affine(x_torch, self._inshape)
         im = self._im.fromtorch(x_torch).mat2gray()  # 1xCxHxW -> HxWxC
